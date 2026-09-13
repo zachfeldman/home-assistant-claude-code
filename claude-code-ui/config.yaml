@@ -1,10 +1,14 @@
 name: "Claude Code UI"
-version: "1.10.0"
+version: "1.11.0"
 slug: "claude-code-ui"
 # Prebuilt multi-arch image published by CI (.github/workflows/build.yml). Store
 # installs pull this instead of building locally. NOTE: local dev installs must
 # strip this line so the Supervisor builds from the Dockerfile (see CLAUDE.md).
-image: "ghcr.io/xionic/claude-code-ui"
+# Points at this fork's own GHCR namespace (matches build.yml's
+# ghcr.io/${{ github.repository_owner }}) — was left pointing at upstream
+# xionic's image post-fork, which meant this repo's CI had nowhere compatible
+# to publish to and Supervisor kept pulling xionic's unmodified build forever.
+image: "ghcr.io/zachfeldman/claude-code-ui"
 description: "Claude Code in your browser with Home Assistant integration and mobile-friendly chat UI."
 url: "https://github.com/xionic/home-assistant-claude-code"
 arch:
