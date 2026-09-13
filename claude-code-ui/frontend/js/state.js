@@ -44,4 +44,8 @@ export const S = {
    *  the viewport around). */
   stickToBottom: true,
   suppressAutoScroll: false,
+
+  /** Nabu Casa's remote-access URL, asked for lazily by voice.js (see there).
+   *  undefined = not asked yet, null = asked and none is connected, string = the URL. */
+  nabuCasaUrl: undefined,
 };

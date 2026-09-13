@@ -137,6 +137,12 @@ export function handleServerMessage(msg) {
       }
       break;
 
+    case 'nabu_casa_url':
+      // Answers voice.js's on-demand request — see there for why this isn't
+      // just part of the 'config' greeting every tab already gets.
+      S.nabuCasaUrl = msg.url;
+      break;
+
     case 'sessions':
       // The catalog of saved conversations is the same for every tab, but
       // `activeId` — when present — is this connection's own view, sent only

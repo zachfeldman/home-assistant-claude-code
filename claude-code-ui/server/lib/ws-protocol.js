@@ -26,6 +26,7 @@ import {
   getLastUsedSessionId, setLastUsedSessionId,
 } from './sessions.js';
 import { answerDialog } from './dialogs.js';
+import { getNabuCasaUrl } from './nabu-casa.js';
 import { resolvePermission, resolvePromptsAllowedBy } from './permissions.js';
 import { saveAttachments, describeAttachments } from './uploads.js';
 import { runQuery, abortActive } from './run-query.js';
@@ -105,6 +106,14 @@ const handlers = {
   auth_code(_ws, msg) {
     const proc = loginProcess();
     if (proc && proc.stdin) proc.stdin.write(msg.code + '\n');
+  },
+
+  // Asked lazily by voice.js, only once it has something to point at (the
+  // browser has already ruled out HTTPS as the cause) — not sent to every
+  // tab on connect, since most never need it. getNabuCasaUrl() never rejects
+  // (falls back to null on any error), so nothing to catch here.
+  nabu_casa_url(ws) {
+    getNabuCasaUrl().then((url) => send(ws, { type: 'nabu_casa_url', url }));
   },
 
   prompt(ws, msg, state) {

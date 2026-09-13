@@ -14,7 +14,12 @@
  *     — no prompt, no per-site override, every attempt fails identically. This
  *     is the single most common cause for a local Home Assistant instance
  *     reached as plain `http://homeassistant.local`. Checked directly via
- *     `isSecureContext` below, so the error names this instead of guessing.
+ *     `isSecureContext` below, so the error names this instead of guessing —
+ *     and, if Nabu Casa remote access is already connected, links straight to
+ *     its (already-HTTPS) URL rather than just describing what to set up. That
+ *     URL comes from the server (HA's own Cloud status is WebSocket-only, not
+ *     something this page can ask HA for directly), asked for lazily and only
+ *     once this error has actually happened — see requestNabuCasaUrl() below.
  *   - Denied at the browser/OS level. Ordinary "no mic access" — fixable from
  *     the browser's own site-permission UI, or (on some OSes) system privacy
  *     settings, same as any other site asking for the microphone.
@@ -23,24 +28,42 @@
  *     microphone access if that outer page's iframe tag allows it — nothing
  *     in this app's own HTML can grant that from in here.
  */
+import { S } from './state.js';
 import { promptInput } from './dom.js';
 import { resizeTextarea, updateSendBtn } from './composer.js';
-import { appendErrorBubble } from './transcript.js';
+import { appendErrorBubble, appendErrorBubbleWithLink } from './transcript.js';
 
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const voiceSupported = !!SpeechRecognitionCtor;
 
 // Repeatedly holding Space against an unfixable-by-retrying condition (no
 // HTTPS, chief among them) would otherwise post an identical bubble into the
-// chat on every single attempt.
-let lastErrorMsg = '';
+// chat on every single attempt. Keyed rather than compared by the rendered
+// text, since the HTTPS message's own text changes once a Nabu Casa URL
+// arrives — the two must still count as the same complaint for throttling.
+// Short enough that someone retrying every second or two still gets an
+// occasional reminder it's not about to start working, rather than one
+// bubble and then apparent silence.
+const ERROR_THROTTLE_MS = 4000;
+let lastErrorKey = '';
 let lastErrorAt = 0;
-function showVoiceError(msg) {
+function shouldShowVoiceError(key) {
   const now = Date.now();
-  if (msg === lastErrorMsg && now - lastErrorAt < 8000) return;
-  lastErrorMsg = msg;
+  if (key === lastErrorKey && now - lastErrorAt < ERROR_THROTTLE_MS) return false;
+  lastErrorKey = key;
   lastErrorAt = now;
-  appendErrorBubble(msg);
+  return true;
+}
+
+// Asked once, the first time it would actually be useful (this same insecure-
+// context error, below) — not on every page load, since most people are on
+// HTTPS and would never need it. S.nabuCasaUrl starts undefined; connection.js
+// fills it in from the server's reply.
+let nabuCasaRequested = false;
+function requestNabuCasaUrl() {
+  if (nabuCasaRequested || !S.ws || !S.isConnected) return;
+  nabuCasaRequested = true;
+  S.ws.send(JSON.stringify({ type: 'nabu_casa_url' }));
 }
 
 // Only worth advertising where it will actually do something — the same
@@ -57,12 +80,23 @@ export function isRecording() { return recording; }
 export function startVoiceInput() {
   if (!voiceSupported || recording) return;
   if (!window.isSecureContext) {
-    showVoiceError(
-      `Voice input needs HTTPS — this page is loaded over ${location.protocol.replace(':', '')}, and ` +
-      'browsers refuse microphone access there entirely, for any site, with no per-site override. ' +
-      'A Nabu Casa remote-access URL is already HTTPS; a local http:// address (even homeassistant.local) ' +
-      'is not, and needs its own certificate (a reverse proxy, or Settings → System → Network) before this can work.',
-    );
+    if (shouldShowVoiceError('insecure-context')) {
+      const intro = `Voice input needs HTTPS — this page is loaded over ${location.protocol.replace(':', '')}, ` +
+        'and browsers refuse microphone access there entirely, for any site, with no per-site override.';
+      if (S.nabuCasaUrl) {
+        appendErrorBubbleWithLink(
+          `${intro} Your Nabu Casa remote-access URL is already HTTPS:`,
+          S.nabuCasaUrl,
+          S.nabuCasaUrl.replace(/^https:\/\//, ''),
+        );
+      } else {
+        appendErrorBubble(
+          `${intro} A local http:// address (even homeassistant.local) needs its own certificate ` +
+          '(a reverse proxy, or Settings → System → Network) before this can work.',
+        );
+      }
+    }
+    requestNabuCasaUrl();
     return;
   }
   recording = true;
@@ -91,7 +125,8 @@ export function startVoiceInput() {
     const err = e.error;
     stopVoiceInput();
     if (err === 'no-speech' || err === 'aborted') return;   // released before saying anything
-    showVoiceError(
+    if (!shouldShowVoiceError(err)) return;
+    appendErrorBubble(
       err === 'not-allowed' || err === 'service-not-allowed'
         ? 'Microphone access was denied. This page is over HTTPS, so that rules out the most common ' +
           'cause — it\'s either your browser\'s own site permission, or, if this is showing through Home ' +

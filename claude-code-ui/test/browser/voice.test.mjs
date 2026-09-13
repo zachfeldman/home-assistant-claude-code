@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 import { startServer } from '../helpers/server-harness.mjs';
+import { startFakeHa, TOKEN } from '../helpers/fake-ha.mjs';
 
 const CANDIDATES = [
   process.env.CHROME_PATH,
@@ -182,6 +183,54 @@ describe('push-to-talk over an insecure origin', { skip }, () => {
     await new Promise((r) => setTimeout(r, 200));
     assert.equal(await page.$$eval('.error-bubble', (els) => els.length), bubblesAfterFirst,
       'retrying an unfixable-by-retrying condition should not post a duplicate bubble');
+  });
+
+  test('with a clean console', () => assert.deepEqual(errors, []));
+});
+
+describe('push-to-talk over an insecure origin, with Nabu Casa connected', { skip }, () => {
+  let ha, h, browser, page, errors;
+  before(async () => {
+    ha = await startFakeHa({
+      commands: { 'cloud/status': { remote_connected: true, remote_domain: 'abc123.ui.nabu.casa' } },
+    });
+    h = await startServer({ env: { SUPERVISOR_TOKEN: TOKEN, HA_SUPERVISOR_URL: ha.supervisorUrl } });
+    browser = await puppeteer.launch({ executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+    page = await browser.newPage();
+    errors = [];
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.evaluateOnNewDocument(installFake);
+    await page.evaluateOnNewDocument(installInsecureContext);
+    await page.goto(h.baseUrl, { waitUntil: 'networkidle0' });
+  });
+  after(async () => {
+    if (browser) await browser.close();
+    if (h) await h.stop();
+    if (ha) await ha.close();
+  });
+
+  test('links straight to it once the server has answered', async () => {
+    await page.focus('#prompt-input');
+
+    // First attempt: the on-demand request has only just been fired, so this
+    // one is still the plain message — same as the no-Nabu-Casa case tested
+    // above, since voice.js cannot know the answer any sooner than this.
+    await page.keyboard.down('Space');
+    await page.keyboard.up('Space');
+    await page.waitForFunction(
+      () => /needs HTTPS/.test(document.getElementById('messages').textContent), { timeout: 2000 });
+    assert.equal(await page.$('.error-bubble a'), null, 'too soon for the server to have answered yet');
+
+    // Wait out the retry throttle, then hold again — the server's answer
+    // (a same-machine round trip) is certainly in by now, so this one links.
+    await new Promise((r) => setTimeout(r, 4300));
+    await page.keyboard.down('Space');
+    await page.keyboard.up('Space');
+    await page.waitForSelector('.error-bubble a', { timeout: 2000 });
+    const link = await page.$eval('.error-bubble a:last-of-type', (a) => ({ href: a.href, text: a.textContent }));
+    assert.equal(link.href, 'https://abc123.ui.nabu.casa/');
+    assert.equal(link.text, 'abc123.ui.nabu.casa');
   });
 
   test('with a clean console', () => assert.deepEqual(errors, []));

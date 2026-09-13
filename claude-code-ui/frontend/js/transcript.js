@@ -342,6 +342,26 @@ export function appendErrorBubble(message) {
   scrollBottom();
 }
 
+// Same as appendErrorBubble, plus a link — kept separate rather than an
+// optional param, since a URL from anywhere other than a fixed string (voice.js's
+// Nabu Casa link is server-reported) is exactly the case worth being unable to
+// pass as freeform HTML by accident: the anchor is built via DOM properties, never
+// string-concatenated markup.
+export function appendErrorBubbleWithLink(message, linkUrl, linkText) {
+  endToolGroup();
+  const div = document.createElement('div');
+  div.className = 'error-bubble';
+  div.append(message + ' ');
+  const a = document.createElement('a');
+  a.href = linkUrl;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = linkText;
+  div.appendChild(a);
+  messagesEl.appendChild(div);
+  scrollBottom();
+}
+
 // A neutral, centered status line in the transcript (e.g. an auto-continue note).
 export function appendInfoLine(text) {
   endToolGroup();
