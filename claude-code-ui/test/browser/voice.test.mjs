@@ -176,9 +176,11 @@ describe('push-to-talk over an insecure origin', { skip }, () => {
     await page.keyboard.down('Space');
     await page.keyboard.up('Space');
     await page.waitForSelector('.error-bubble a', { timeout: 2000 });
-    const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent }));
+    const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent, target: a.target }));
     assert.match(link.href, /\/config\/cloud$/);
     assert.equal(link.text, 'Home Assistant Cloud settings');
+    assert.equal(link.target, '_top',
+      '_blank would cold-boot a disconnected copy of the HA frontend, which loses the deep link to its own login redirect');
     assert.match(await page.$eval('.error-bubble', (el) => el.textContent), /needs HTTPS/);
     assert.equal(await page.$eval('#prompt-input', (el) => el.classList.contains('listening')), false,
       'must bail before ever starting a recognizer it cannot use');
@@ -227,9 +229,10 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     await page.keyboard.down('Space');
     await page.keyboard.up('Space');
     await page.waitForSelector('.error-bubble a', { timeout: 2000 });
-    const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent }));
+    const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent, target: a.target }));
     assert.equal(link.href, 'https://abc123.ui.nabu.casa/');
     assert.equal(link.text, 'abc123.ui.nabu.casa');
+    assert.equal(link.target, '_blank', 'a genuinely external destination, unlike the Cloud-settings link above');
     assert.match(await page.$eval('.error-bubble', (el) => el.textContent), /needs HTTPS/);
   });
 

@@ -128,6 +128,7 @@ export async function startVoiceInput() {
         'proxy, or connecting Nabu Casa remote access, which is already HTTPS:',
         `${location.origin}/config/cloud`,
         'Home Assistant Cloud settings',
+        '_top',   // same-origin HA path — reuse the already-authenticated tab, see appendErrorBubbleWithLink
       );
     }
     return;

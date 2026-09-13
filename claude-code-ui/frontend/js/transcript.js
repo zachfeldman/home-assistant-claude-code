@@ -347,14 +347,23 @@ export function appendErrorBubble(message) {
 // Nabu Casa link is server-reported) is exactly the case worth being unable to
 // pass as freeform HTML by accident: the anchor is built via DOM properties, never
 // string-concatenated markup.
-export function appendErrorBubbleWithLink(message, linkUrl, linkText) {
+//
+// `target` defaults to '_blank' (a genuinely separate destination — an
+// external site, say) but a same-origin Home Assistant path (this app is
+// always viewed through HA's own ingress <iframe>) needs '_top' instead:
+// '_blank' would cold-boot an entire second copy of the HA frontend in a
+// disconnected tab, which typically loses the requested deep link to its own
+// login/redirect flow and lands on the dashboard instead. '_top' breaks out
+// of this app's iframe and reuses the *existing*, already-authenticated HA
+// tab, so its router just switches views — no reboot, nothing to lose.
+export function appendErrorBubbleWithLink(message, linkUrl, linkText, target = '_blank') {
   endToolGroup();
   const div = document.createElement('div');
   div.className = 'error-bubble';
   div.append(message + ' ');
   const a = document.createElement('a');
   a.href = linkUrl;
-  a.target = '_blank';
+  a.target = target;
   a.rel = 'noopener noreferrer';
   a.textContent = linkText;
   div.appendChild(a);
