@@ -9,7 +9,8 @@
  */
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 import { startServer, userLine, assistantLine } from '../helpers/server-harness.mjs';
 import { startFakeHa, TOKEN } from '../helpers/fake-ha.mjs';
@@ -339,21 +340,25 @@ describe('a draft left in the box', { skip }, () => {
   test('with a clean console', () => assert.deepEqual(errors, []));
 });
 
-describe('leaving a chat while Claude is still working', { skip }, () => {
-  let h, browser, page, errors, spy;
+// Deliberately changed behavior (fed73a7, concurrent sessions): a run belongs
+// to its session, not the tab that started it, and is never aborted by
+// session_switch/new_session — only session_delete stops one. So there is
+// nothing left to warn about when leaving a running chat: the turn keeps
+// going server-side, unsupervised, and is exactly where you left it (running
+// or finished) when you come back via Sessions. This block used to assert the
+// opposite (a confirm dialog, and that switching was refused until answered)
+// under the old single-run-per-app model; see git history before this comment
+// for that version.
+describe('switching away from a chat while Claude is still working', { skip }, () => {
+  let h, browser, page, errors;
   before(async () => {
+    // A short run, so a later test can observe it actually finish unsupervised.
     h = await startServer({
-      // One long run, so the whole block executes with a turn in flight.
-      scenario: { runs: [{ steps: [{ text: 'thinking about it' }, { sleep: 30000 }] }] },
+      scenario: { runs: [{ steps: [{ sleep: 300 }, { text: 'done thinking' }] }] },
       sessions: {
-        'aaaaaaaa-0000-0000-0000-000000000001': [userLine('what is the hall light doing')],
         'bbbbbbbb-0000-0000-0000-000000000002': [userLine('the boiler again')],
       },
     });
-    // A second socket, so "nothing was sent" is asserted against the server's
-    // own broadcasts rather than against the DOM of the tab under test.
-    spy = await h.connect();
-    await spy.waitFor('history');
     ({ browser, page, errors } = await launch(h));
 
     await page.type('#prompt-input', 'take your time');
@@ -371,104 +376,74 @@ describe('leaving a chat while Claude is still working', { skip }, () => {
     await new Promise((r) => setTimeout(r, 250));
   };
 
-  test('clicking another chat asks first, and sends nothing yet', async () => {
-    const before = spy.all('history').length;
+  test('clicking another chat switches immediately, without asking', async () => {
     await openPanel();
     await page.click('.session-item');
-    await page.waitForSelector('#confirm-overlay:not(.hidden)', { timeout: 5000 });
-
-    assert.match(await page.$eval('#confirm-title', (el) => el.textContent), /still working/i);
-    await new Promise((r) => setTimeout(r, 200));
-    assert.equal(spy.all('history').length, before,
-      'the switch was sent before the user had answered');
+    await page.waitForSelector('#sessions-panel.hidden', { timeout: 5000 });
+    assert.equal(await page.$eval('#confirm-overlay', (el) => el.classList.contains('hidden')), true,
+      'a run outlives the tab that started it, so there is nothing to warn about abandoning');
   });
 
-  test('staying here leaves the panel open and the turn running', async () => {
-    await page.click('#confirm-no');
-    await page.waitForSelector('#confirm-overlay.hidden', { timeout: 5000 });
-
-    assert.equal(await page.$eval('#sessions-panel', (el) => el.classList.contains('hidden')), false,
-      'cancelling closed the panel, so the user cannot pick a different chat');
-    assert.equal(await page.$eval('#send-btn', (el) => el.classList.contains('stop')), true,
-      'the turn stopped anyway');
-  });
-
-  test('Escape and a click on the backdrop both mean stay', async () => {
-    const before = spy.all('history').length;
-
-    await page.click('.session-item');
-    await page.waitForSelector('#confirm-overlay:not(.hidden)', { timeout: 5000 });
-    await page.keyboard.press('Escape');
-    await page.waitForSelector('#confirm-overlay.hidden', { timeout: 5000 });
-
-    await page.click('.session-item');
-    await page.waitForSelector('#confirm-overlay:not(.hidden)', { timeout: 5000 });
-    // The backdrop is the overlay itself; click a corner well clear of the card.
-    await page.mouse.click(8, 8);
-    await page.waitForSelector('#confirm-overlay.hidden', { timeout: 5000 });
-
-    assert.equal(spy.all('history').length, before,
-      'dismissing the warning switched chats anyway');
-  });
-
-  test('the new-chat button asks too, and /new cannot get round it', async () => {
+  test('the new-chat button, and /new, also switch without asking', async () => {
     await page.click('#new-session-btn');
-    await page.waitForSelector('#confirm-overlay:not(.hidden)', { timeout: 5000 });
-    assert.match(await page.$eval('#confirm-yes', (el) => el.textContent), /new chat/i);
-    await page.click('#confirm-no');
-    await page.waitForSelector('#confirm-overlay.hidden', { timeout: 5000 });
+    await page.waitForFunction(
+      () => document.getElementById('prompt-input').value === '', { timeout: 5000 });
+    assert.equal(await page.$eval('#confirm-overlay', (el) => el.classList.contains('hidden')), true);
 
-    const before = spy.all('cleared').length;
+    // /new goes through the same runUiCommand path as the button — confirm
+    // that route was not left with a guard of its own.
     await page.type('#prompt-input', '/new');
     await page.keyboard.press('Enter');
-    await page.waitForSelector('#confirm-overlay:not(.hidden)', { timeout: 5000 });
-    await page.click('#confirm-no');
-    await page.waitForSelector('#confirm-overlay.hidden', { timeout: 5000 });
-    assert.equal(spy.all('cleared').length, before, '/new started a new chat without asking');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(await page.$eval('#confirm-overlay', (el) => el.classList.contains('hidden')), true);
   });
 
-  test('going ahead switches, and the panel closes', async () => {
-    const before = spy.all('history').length;
-    await openPanel();
-    await page.click('.session-item');
-    await page.waitForSelector('#confirm-overlay:not(.hidden)', { timeout: 5000 });
-    await page.click('#confirm-yes');
+  test('the abandoned turn keeps running and finishes on its own', async () => {
+    // Every tab moved on above, twice — nobody has been viewing this run's
+    // session for a while now. Read its transcript straight off disk (not the
+    // live WebSocket stream, which a newly-connecting viewer would only catch
+    // if it arrived while still subscribed) to prove it completed anyway.
+    const sid = await page.evaluate(() => sessionStorage.getItem('activeSessionId'));
+    assert.ok(sid, 'the run should have been assigned a session id by the time it started');
 
-    await spy.waitFor((m) => m.type === 'history' && spy.all('history').length > before);
-    await page.waitForSelector('#sessions-panel.hidden', { timeout: 5000 });
+    const transcript = path.join(h.store, `${sid}.jsonl`);
+    const started = Date.now();
+    while (!existsSync(transcript) || !readFileSync(transcript, 'utf8').includes('done thinking')) {
+      if (Date.now() - started > 5000) {
+        assert.fail('the abandoned run never finished (or never persisted) on its own');
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   });
 
   test('with a clean console', () => assert.deepEqual(errors, []));
 });
 
 describe('leaving a chat when nothing is running', { skip }, () => {
-  let h, browser, page, errors, spy;
+  let h, browser, page, errors;
   before(async () => {
     h = await startServer({
       sessions: { 'cccccccc-0000-0000-0000-000000000003': [userLine('an old conversation')] },
     });
-    spy = await h.connect();
-    await spy.waitFor('history');
     ({ browser, page, errors } = await launch(h));
   });
   after(async () => { if (browser) await browser.close(); if (h) await h.stop(); });
 
   test('switches straight away — the guard must not become a nag', async () => {
-    const before = spy.all('history').length;
     await page.click('#sessions-btn');
     await page.waitForSelector('#sessions-panel:not(.hidden) .session-item', { timeout: 5000 });
     await new Promise((r) => setTimeout(r, 250));
     await page.click('.session-item');
 
-    await spy.waitFor((m) => m.type === 'history' && spy.all('history').length > before);
+    await page.waitForSelector('#sessions-panel.hidden', { timeout: 5000 });
     assert.equal(await page.$eval('#confirm-overlay', (el) => el.classList.contains('hidden')), true,
       'an idle app asked before switching');
   });
 
   test('and a new chat starts without asking', async () => {
-    const before = spy.all('cleared').length;
     await page.click('#new-session-btn');
-    await spy.waitFor((m) => m.type === 'cleared' && spy.all('cleared').length > before);
+    await page.waitForFunction(
+      () => document.getElementById('prompt-input').value === '', { timeout: 5000 });
     assert.equal(await page.$eval('#confirm-overlay', (el) => el.classList.contains('hidden')), true);
   });
 

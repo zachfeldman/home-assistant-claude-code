@@ -150,6 +150,46 @@ describe('the chat UI', { skip: executablePath ? false : 'no Chrome found (set C
   });
 });
 
+describe('composer keyboard shortcuts', { skip: executablePath ? false : 'no Chrome found (set CHROME_PATH)' }, () => {
+  let h, browser, page;
+  before(async () => {
+    // Exactly one scripted run — only the plain-Enter test below actually sends.
+    h = await startServer({ scenario: { runs: [{ steps: [{ text: 'got it' }] }] } });
+    browser = await puppeteer.launch({ executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+    page = await browser.newPage();
+    await page.goto(h.baseUrl, { waitUntil: 'networkidle0' });
+  });
+  after(async () => {
+    if (browser) await browser.close();
+    if (h) await h.stop();
+  });
+
+  test('Ctrl+Enter inserts a newline instead of sending', async () => {
+    await page.type('#prompt-input', 'line one');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('Enter');
+    await page.keyboard.up('Control');
+    await page.type('#prompt-input', 'line two');
+    assert.equal(await page.$eval('#prompt-input', (el) => el.value), 'line one\nline two',
+      'Ctrl+Enter must insert a newline rather than submit');
+    assert.equal(await page.$eval('#send-btn', (el) => el.classList.contains('stop')), false, 'nothing was sent yet');
+  });
+
+  test('Shift+Enter also inserts a newline, not just Ctrl+Enter', async () => {
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('Enter');
+    await page.keyboard.up('Shift');
+    assert.equal(await page.$eval('#prompt-input', (el) => el.value), 'line one\nline two\n');
+  });
+
+  test('plain Enter sends what has been typed so far and clears the box', async () => {
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.bubble-user', { timeout: 5000 });
+    assert.match(await page.$eval('.bubble-user', (el) => el.textContent), /line one[\s\S]*line two/);
+    assert.equal(await page.$eval('#prompt-input', (el) => el.value), '');
+  });
+});
+
 describe('the layout on a phone', { skip: executablePath ? false : 'no Chrome found (set CHROME_PATH)' }, () => {
   let h, browser, page;
   before(async () => {

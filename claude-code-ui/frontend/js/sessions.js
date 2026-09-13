@@ -2,6 +2,7 @@
  * The sessions panel — past conversations, read from Claude Code's own store.
  */
 import { S } from './state.js';
+import { confirmAction } from './confirm.js';
 import { sessionsBtn, sessionsListEl, sessionsPanel } from './dom.js';
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -41,11 +42,16 @@ export function renderSessions() {
     del.className = 'session-del';
     del.textContent = '✕';
     del.title = 'Delete session';
-    del.onclick = (e) => {
+    del.onclick = async (e) => {
       e.stopPropagation();
-      if (confirm('Delete this session permanently?')) {
-        if (S.ws && S.isConnected) S.ws.send(JSON.stringify({ type: 'session_delete', id: s.id }));
-      }
+      const ok = await confirmAction({
+        title: 'Delete this conversation?',
+        body: 'It will be removed from the store permanently. This cannot be undone.',
+        confirm: 'Delete',
+        cancel: 'Keep it',
+      });
+      if (!ok) return;
+      if (S.ws && S.isConnected) S.ws.send(JSON.stringify({ type: 'session_delete', id: s.id }));
     };
 
     item.onclick = () => {

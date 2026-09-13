@@ -142,7 +142,9 @@ promptInput.onkeydown = (e) => {
     }
     if (e.key === 'Escape')    { e.preventDefault(); hideCmdMenu(); return; }
   }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+  // Plain Enter sends; Ctrl/Cmd/Shift+Enter falls through to the textarea's own
+  // default behavior and inserts a newline instead.
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     inputForm.dispatchEvent(new Event('submit'));
   }
