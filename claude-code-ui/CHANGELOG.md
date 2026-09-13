@@ -1,7 +1,13 @@
-## Unreleased
+## 1.11.1
+- **Fixed the app failing to load entirely.** `1.11.0` was the first release actually built from this fork (see 1.11.0 below) and shipped a leftover reference to a function deleted during the concurrent-tabs refactor, which made the browser throw a module-load error before anything on the page could wire itself up — every button, including Send, was dead and the console showed a JS error. Restored the missing function
+- Noted for next time: the headless-Chrome browser tests (`npm run test:browser`), which load the page for real and would have caught this, are advisory-only in CI (`continue-on-error: true`) and don't gate publishing. Worth revisiting if this class of bug recurs
+
+## 1.11.0
 - **Switching to another chat while Claude is working now asks first.** Picking a past conversation from Sessions silently stopped the turn in progress, which looked exactly like the reply having been lost. It now says what will happen and waits for you — and the same warning covers the new-chat button and `/new`, which could previously slip past it
 - **`ha-tools config-check` catches the errors it used to miss.** It reported "valid" for a config Home Assistant would load *without* the entity you had just written: a bad option in a `template:` or platform entry doesn't stop the config loading, it just makes Home Assistant drop that entity and carry on — and the endpoint the check relied on never mentioned it. Claude followed the tool's own advice, reloaded, and moved on believing a blind was set up that did not exist. The check now reads what Home Assistant logs *while it is checking*, names the file, line and key, and fails
 - **`ha-tools reload` verifies the reload instead of the phone call.** It used to report success whenever the request went through. It now surfaces the same errors, and `--expect <entity_id>` will fail if the entity you just wrote doesn't actually appear
+- **Two browser tabs can now run two different conversations at once.** Previously every tab shared one active session and one in-flight query — switching chats in one tab switched it for everyone, and a prompt in one tab could abort a run in another. Each tab now tracks its own conversation; one person with several tabs open still lands back on the same chat by default
+- **Fixed Supervisor installs of this fork silently running upstream's unmodified image.** `config.yaml` still pointed at `xionic`'s published image after forking, so this fork's own commits — including the concurrent-tabs work above — were never actually deployed. Now points at this fork's own image
 
 ## 1.10.0
 - **Updated to the current Claude Code engine** (Agent SDK 0.3.237, from 0.3.165 — about two and a half months of fixes and model updates). Nothing changes in how the app is used
