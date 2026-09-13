@@ -37,15 +37,31 @@ describe('the session list', () => {
     assert.equal(s.sessions.find((x) => x.id === 'junk'), undefined);
   });
 
-  test('switching loads that transcript and tells every tab', async () => {
+  // Deliberately changed behavior: switching used to broadcast the new
+  // session to every connected tab, because there was only ever one
+  // conversation for the whole app to share. That is exactly the limitation
+  // this app no longer has — two tabs can now each look at (and run) their
+  // own conversation. Switching in tab `a` still updates the on-disk default
+  // a brand-new, unqualified tab will land on next (so `c` below picks it up
+  // on connect), but it must not move `b`, which never asked to go anywhere.
+  test('switching moves only that tab; a fresh tab picks up the new default', async () => {
     const a = await h.connect();
     const b = await h.connect();
     await Promise.all([a.waitFor('history'), b.waitFor('history')]);
-    a.send({ type: 'session_switch', id: 'two' });
+    b.messages.length = 0;   // only care about what arrives *after* the switch
 
-    const hist = await b.waitFor((m) => m.type === 'history' && m.items.some((i) => i.text === 'Tidy the dashboard'));
+    a.send({ type: 'session_switch', id: 'two' });
+    const hist = await a.waitFor((m) => m.type === 'history' && m.items.some((i) => i.text === 'Tidy the dashboard'));
     assert.equal(hist.running, false);
     assert.equal(h.readData('active-session.json').sessionId, 'two');
+
+    // Give any errant broadcast a moment to arrive, then confirm b saw nothing.
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(b.all('history').length, 0, 'b was not dragged along by a\'s switch');
+
+    const c = await h.connect();
+    const chist = await c.waitFor((m) => m.type === 'history' && m.items.some((i) => i.text === 'Tidy the dashboard'));
+    assert.equal(chist.running, false, 'a fresh tab with no preference of its own defaults to the new default session');
   });
 
   test('deleting removes it from the store and clears the chat if it was open', async () => {

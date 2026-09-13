@@ -34,7 +34,7 @@ import {
   ALLOW_ADDON_CONFIGS, ENABLE_ESPHOME, ESPHOME_CONFIG_DIR, VERBOSE_LOGGING,
 } from './lib/config.js';
 import { isSubscriptionAuth } from './lib/auth.js';
-import { loadActive } from './lib/sessions.js';
+import { loadLastUsedSessionId } from './lib/sessions.js';
 import { sanitizeMcpState } from './lib/mcp.js';
 import { ensureUploadDir, cleanupUploads } from './lib/uploads.js';
 import { refreshHaLinks } from './lib/ha-links.js';
@@ -69,7 +69,7 @@ attach(wss);
 autoContinue.setResumeRunner(runQuery);
 
 sanitizeMcpState();
-loadActive();
+loadLastUsedSessionId();
 autoContinue.load();
 cleanupUploads();          // drop attachments older than a week
 refreshHaLinks();          // populate entity/automation link targets

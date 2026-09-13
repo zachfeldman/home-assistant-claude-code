@@ -3,34 +3,49 @@
  *
  * Multi-session browsing is built on the canonical JSONL transcripts at
  * ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl — the same files the CLI
- * writes, so a session started here can be picked up there and vice versa. The
- * only thing this app keeps of its own is a pointer to the active session.
+ * writes, so a session started here can be picked up there and vice versa.
+ *
+ * Each browser connection tracks its own session (see ws-protocol.js) — but a
+ * *fresh* connection with no preference of its own (a browser tab that has
+ * never switched anywhere, or a reconnect with nothing in sessionStorage yet)
+ * needs a sensible default rather than always landing on "new chat". That
+ * default is `lastUsedSessionId` below: whichever session was most recently
+ * switched to, resumed, or created, by anyone. It is a *default*, not a
+ * shared pointer — a connection that already has its own preference (via
+ * `?sessionId=`, sessionStorage) is never overridden by another tab changing
+ * this.
  */
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import path from 'path';
 import { STORE_DIR, ACTIVE_FILE } from './config.js';
-import { runtime } from './state.js';
 
 export function sessionFile(id) {
   return path.join(STORE_DIR, `${id}.jsonl`);
 }
 
-export function loadActive() {
-  try {
-    if (existsSync(ACTIVE_FILE)) {
-      runtime.activeSessionId = JSON.parse(readFileSync(ACTIVE_FILE, 'utf8')).sessionId || null;
-    }
-  } catch (e) { console.warn('Could not load active session:', e.message); }
-  // A pointer to a session that no longer exists would replay an empty chat for
-  // ever, so drop it.
-  if (runtime.activeSessionId && !existsSync(sessionFile(runtime.activeSessionId))) {
-    runtime.activeSessionId = null;
-  }
+let lastUsedSessionId = null;
+
+export function getLastUsedSessionId() {
+  return lastUsedSessionId;
 }
 
-export function saveActive() {
-  try { writeFileSync(ACTIVE_FILE, JSON.stringify({ sessionId: runtime.activeSessionId })); }
-  catch (e) { console.warn('Could not save active session:', e.message); }
+export function setLastUsedSessionId(id) {
+  lastUsedSessionId = id || null;
+  try { writeFileSync(ACTIVE_FILE, JSON.stringify({ sessionId: lastUsedSessionId })); }
+  catch (e) { console.warn('Could not save last-used session:', e.message); }
+}
+
+/** Load the persisted default at boot. A pointer to a session that no longer
+ *  exists would default every fresh tab to an empty chat forever, so drop it. */
+export function loadLastUsedSessionId() {
+  try {
+    if (existsSync(ACTIVE_FILE)) {
+      lastUsedSessionId = JSON.parse(readFileSync(ACTIVE_FILE, 'utf8')).sessionId || null;
+    }
+  } catch (e) { console.warn('Could not load last-used session:', e.message); }
+  if (lastUsedSessionId && !existsSync(sessionFile(lastUsedSessionId))) {
+    lastUsedSessionId = null;
+  }
 }
 
 export function blockText(content) {

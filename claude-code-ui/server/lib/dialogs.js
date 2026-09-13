@@ -13,14 +13,14 @@
  * shape, and a denial's message is what reaches the model as the tool result —
  * verified live: the model reads it as the answer and carries on normally.
  *
- * Pending questions are module-level, not per-connection: a question belongs to
- * the run, so any tab may answer it and a tab that connects later is shown the
- * one still waiting.
+ * A pending question belongs to the run that asked it, not to a connection —
+ * it lives on that run's own `pendingDialogs` map (state.js) so any tab
+ * currently viewing that session may answer it, and a tab that switches to
+ * view it later is shown the one still waiting (see ws-protocol.js).
  */
 import { randomUUID } from 'crypto';
-import { broadcast } from './broadcast.js';
-
-export const pendingDialogs = new Map();   // id → { payload, resolve }
+import { sendToSessionOrBroadcast } from './broadcast.js';
+import { findRunByPendingId } from './state.js';
 
 export function formatQuestionDenial(toolInput, result) {
   if (!result || !result.answers) {
@@ -39,38 +39,41 @@ export function formatQuestionDenial(toolInput, result) {
 }
 
 /**
- * Put a question to whoever is connected and wait — however long that takes.
+ * Put a question to whoever is viewing this run's session (or, if nobody is
+ * right now, every connected tab) and wait — however long that takes.
  * Resolves with the raw answer payload, or null if it was skipped or aborted.
  *
  * Deliberately waits even with nobody connected right now (an unattended
- * auto-continue resume, or a phone mid-reconnect): broadcast() to zero clients
- * is a no-op, and a client that connects later is shown every entry still
- * pending. The question is just as answerable in ten minutes, or tomorrow, as it
- * was the instant it was asked. The only things that end the wait are an answer,
- * Skip, or the run itself ending.
+ * auto-continue resume, or a phone mid-reconnect): a send to zero clients is a
+ * no-op, and a client that connects/switches in later is shown every entry
+ * still pending. The question is just as answerable in ten minutes, or
+ * tomorrow, as it was the instant it was asked. The only things that end the
+ * wait are an answer, Skip, or the run itself ending.
  */
-export function askQuestion(toolInput, signal) {
+export function askQuestion(run, toolInput, signal) {
   return new Promise((resolve) => {
     const id = randomUUID();
-    pendingDialogs.set(id, { payload: toolInput, resolve });
-    broadcast({ type: 'user_dialog', id, dialogKind: 'askUserQuestion', payload: toolInput });
+    run.pendingDialogs.set(id, { payload: toolInput, resolve });
+    sendToSessionOrBroadcast(run.sessionId, { type: 'user_dialog', id, dialogKind: 'askUserQuestion', payload: toolInput });
     signal?.addEventListener('abort', () => {
-      if (pendingDialogs.delete(id)) {
+      if (run.pendingDialogs.delete(id)) {
         // Without telling the clients, the question would sit on screen as
         // still-waiting after Stop had already ended the turn.
-        broadcast({ type: 'user_dialog_cancelled', id });
+        sendToSessionOrBroadcast(run.sessionId, { type: 'user_dialog_cancelled', id });
         resolve(null);
       }
     }, { once: true });
   });
 }
 
-/** Answer a pending question. Returns false if it is no longer waiting. */
+/** Answer a pending question, wherever it lives. Returns false if it is no
+ *  longer waiting. */
 export function answerDialog(id, result) {
-  const entry = pendingDialogs.get(id);
-  if (!entry) return false;
-  pendingDialogs.delete(id);
-  broadcast({ type: 'user_dialog_cancelled', id });   // close it on every other tab
+  const run = findRunByPendingId('pendingDialogs', id);
+  if (!run) return false;
+  const entry = run.pendingDialogs.get(id);
+  run.pendingDialogs.delete(id);
+  sendToSessionOrBroadcast(run.sessionId, { type: 'user_dialog_cancelled', id });   // close it on every other viewer
   entry.resolve(result || null);
   return true;
 }
@@ -78,12 +81,14 @@ export function answerDialog(id, result) {
 /**
  * The `auto` permission mode is SDK-native and has no canUseTool, so the same
  * interception happens as a PreToolUse hook — which runs in every mode and
- * short-circuits the tool before it executes.
+ * short-circuits the tool before it executes. `run` is bound in by
+ * permissions.js's `hooksFor`, since a hook has no other way to know which
+ * run it is running inside.
  */
-export async function askQuestionHook(input, _toolUseID, options) {
+export async function askQuestionHook(run, input, _toolUseID, options) {
   if (input?.tool_name !== 'AskUserQuestion') return { continue: true };
   const toolInput = input.tool_input || {};
-  const answer = await askQuestion(toolInput, options?.signal);
+  const answer = await askQuestion(run, toolInput, options?.signal);
   const denial = formatQuestionDenial(toolInput, answer);
   return {
     continue: true,

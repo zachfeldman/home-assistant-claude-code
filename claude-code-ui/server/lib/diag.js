@@ -15,11 +15,10 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import {
   WORK_DIR, CLAUDE_CONFIG_DIR, STORE_DIR, HOME_DIR, PLUGINS, SUPERVISOR_URL,
 } from './config.js';
-import { runtime } from './state.js';
 import { broadcast } from './broadcast.js';
 import { runCmd } from './exec.js';
 import { isSubscriptionAuth } from './auth.js';
-import { parseSession, listSessions, sessionTitle, saveActive } from './sessions.js';
+import { parseSession, listSessions, sessionTitle, getLastUsedSessionId } from './sessions.js';
 import { ADDON_CONFIGS_HOOKS } from './permissions.js';
 import { runQuery, abortActive } from './run-query.js';
 import * as autoContinue from './auto-continue.js';
@@ -133,19 +132,22 @@ export function registerDiagRoutes(app) {
   });
 
   // Auto-continue state, and a way to exercise the schedule→resume path without
-  // waiting for a real usage limit: ?simulate=<seconds>.
+  // waiting for a real usage limit: ?simulate=<seconds>[&sessionId=<id>].
+  // Defaults to the last-used session (see sessions.js), same as a browser
+  // tab that connects with no preference of its own.
   app.get('/diag/autocontinue', (req, res) => {
     const sim = req.query.simulate;
     if (sim != null) {
       if (!isSubscriptionAuth()) return res.json({ error: 'not subscription auth' });
-      if (!runtime.activeSessionId) return res.json({ error: 'no active session to resume' });
+      const sessionId = (req.query.sessionId || '').toString() || getLastUsedSessionId();
+      if (!sessionId) return res.json({ error: 'no session to resume — pass ?sessionId= or start one first' });
       const secs = Math.max(1, parseInt(sim, 10) || 5);
       autoContinue.autoContinue.enabled = true;
       autoContinue.save();
       autoContinue.schedule({
         resetsAt: Math.floor(Date.now() / 1000) + secs,
         rateLimitType: 'five_hour',
-        model: null, effort: null, permissionMode: 'bypass', attempts: 1,
+        model: null, effort: null, permissionMode: 'bypass', attempts: 1, sessionId,
       });
     }
     res.json({
@@ -153,21 +155,20 @@ export function registerDiagRoutes(app) {
       pending: autoContinue.autoContinue.pending,
       timerArmed: autoContinue.isTimerArmed(),
       subscription: isSubscriptionAuth(),
-      activeSessionId: runtime.activeSessionId,
     });
   });
 
-  // The active session: resume id and parsed transcript length. ?clear=1 clears it.
+  // The last-used session (or ?sessionId= to name a different one): resume id
+  // and parsed transcript length. ?clear=1 aborts its run (if any).
   app.get('/diag/conv', (req, res) => {
+    const sessionId = (req.query.sessionId || '').toString() || getLastUsedSessionId();
     if (req.query.clear) {
-      abortActive();
-      runtime.activeSessionId = null;
-      saveActive();
-      broadcast({ type: 'cleared' });
+      abortActive(sessionId);
+      broadcast({ type: 'sessions', sessions: listSessions() });
     }
-    const items = parseSession(runtime.activeSessionId);
+    const items = parseSession(sessionId);
     res.json({
-      activeSessionId: runtime.activeSessionId,
+      activeSessionId: sessionId,
       count: items.length,
       last: items.slice(-8),
       sessionCount: listSessions().length,
@@ -175,12 +176,15 @@ export function registerDiagRoutes(app) {
   });
 
   // Drive one real turn through the session/resume path, with no browser.
+  // ?sessionId= resumes that session; omitted, it resumes the last-used one,
+  // or starts a brand-new one if there isn't one yet.
   app.get('/diag/feed', async (req, res) => {
     const q = (req.query.q || 'Say hello in three words.').toString();
+    const sessionId = (req.query.sessionId || '').toString() || getLastUsedSessionId();
     const headlessWs = { readyState: 3 };   // never open, never in `connections`
-    await runQuery(headlessWs, { pendingPermissions: new Map() }, { text: q, permissionMode: 'auto' });
-    const items = parseSession(runtime.activeSessionId);
-    res.json({ activeSessionId: runtime.activeSessionId, count: items.length, last: items.slice(-6) });
+    const finalId = await runQuery(headlessWs, { pendingRunId: null }, { text: q, permissionMode: 'auto', sessionId });
+    const items = parseSession(finalId);
+    res.json({ activeSessionId: finalId, count: items.length, last: items.slice(-6) });
   });
 
   // Search every stored session for a term, returning readable snippets.
@@ -237,7 +241,7 @@ export function registerDiagRoutes(app) {
       const needle = req.query.find.toString().toLowerCase();
       sessions = sessions.filter((s) => s.title.toLowerCase().includes(needle));
     }
-    res.json({ store: STORE_DIR, active: runtime.activeSessionId, sessions });
+    res.json({ store: STORE_DIR, active: getLastUsedSessionId(), sessions });
   });
 
   // The raw on-disk store, for verifying where transcripts actually live.

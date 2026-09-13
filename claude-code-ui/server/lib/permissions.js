@@ -1,20 +1,29 @@
 /*
- * How a tool call gets approved: the /addon_configs guard, and the canUseTool
- * that backs the ask / acceptEdits / bypass / plan modes.
+ * How a tool call gets approved: the guard for other add-ons' config folder
+ * (ADDON_CONFIGS_PATH, from config.js), and the canUseTool that backs the
+ * ask / acceptEdits / bypass / plan modes.
  *
  * Two mechanisms, deliberately. A PreToolUse *hook* is used for the
- * /addon_configs guard because it runs in **all** permission modes — including
- * `auto`, which has no canUseTool at all — and its deny short-circuits the tool
- * before it executes. canUseTool is used for anything the user should be asked
- * about, because only it can carry a decision back from the browser.
+ * ADDON_CONFIGS_PATH guard because it runs in **all** permission modes —
+ * including `auto`, which has no canUseTool at all — and its deny
+ * short-circuits the tool before it executes. canUseTool is used for
+ * anything the user should be asked about, because only it can carry a
+ * decision back from the browser.
+ *
+ * A pending permission prompt belongs to the run that asked it (its own
+ * `pendingPermissions` map, state.js) rather than to a connection — a
+ * headless run (auto-continue resuming with no browser open) needs the same
+ * answerable-by-anyone behavior an interactive run gets, so there is no
+ * longer a separate "headless" bucket: every run, however it started, has
+ * one.
  */
 import { randomUUID } from 'crypto';
 import {
   ALLOW_ADDON_CONFIGS, ADDON_CONFIGS_PATH, ENABLE_ESPHOME, ESPHOME_CONFIG_DIR, EDIT_TOOLS,
 } from './config.js';
 import { log } from './log.js';
-import { runtime } from './state.js';
-import { connections, send, broadcast } from './broadcast.js';
+import { findRunByPendingId } from './state.js';
+import { connections, send, sendToSessionOrBroadcast } from './broadcast.js';
 import { askQuestion, formatQuestionDenial, askQuestionHook } from './dialogs.js';
 
 /**
@@ -34,20 +43,20 @@ export function describeSuggestions(suggestions) {
 }
 
 /**
- * When ESPHome is enabled, its config folder under /addon_configs is a
- * legitimate target even if broad access is off — but only that folder. A tool
- * call qualifies when *every* /addon_configs reference in it is inside that dir.
+ * When ESPHome is enabled, its config folder under ADDON_CONFIGS_PATH is a
+ * legitimate target even if broad access is off — but only that folder. A
+ * tool call qualifies when every such reference in it is inside that dir.
  */
 export function touchesOnlyEsphome(blob) {
   if (!ENABLE_ESPHOME || !ESPHOME_CONFIG_DIR) return false;
-  const refs = blob.match(/\/addon_configs\/[^"'\s)]+/g) || [];
+  const refs = blob.match(new RegExp(ADDON_CONFIGS_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/[^"\'\\s)]+', 'g')) || [];
   return refs.length > 0 && refs.every((r) => r === ESPHOME_CONFIG_DIR || r.startsWith(ESPHOME_CONFIG_DIR + '/'));
 }
 
 /**
  * Matching the absolute path in the serialized tool input catches Read/Edit/Write
  * (file_path), Glob/Grep (path) and Bash (command) uniformly; nothing under
- * /addon_configs is reachable from the /config cwd without naming that path.
+ * ADDON_CONFIGS_PATH is reachable from the /config cwd without naming that path.
  */
 export function addonConfigsDenyHook(input) {
   const blob = JSON.stringify(input?.tool_input ?? '');
@@ -59,7 +68,7 @@ export function addonConfigsDenyHook(input) {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
       permissionDecisionReason:
-        'Access to /addon_configs (other apps’ configuration) is disabled. ' +
+        'Access to /addon_configs (other apps\u2019 configuration) is disabled. ' +
         'Turn on "Allow access to other app configs" in the app Configuration tab to enable it.',
     },
   };
@@ -73,78 +82,58 @@ export const ADDON_CONFIGS_HOOKS = ADDON_CONFIGS_HOOK
   ? { PreToolUse: [{ hooks: [ADDON_CONFIGS_HOOK] }] }
   : undefined;
 
-/** PreToolUse hooks for a run: the guard, plus the question interceptor in `auto`. */
-export function hooksFor(mode) {
+/** PreToolUse hooks for one run: the guard, plus the question interceptor in
+ *  `auto` mode (bound to this run, since a hook has no other way to reach it). */
+export function hooksFor(mode, run) {
   const pre = [];
   if (ADDON_CONFIGS_HOOK) pre.push(ADDON_CONFIGS_HOOK);
-  if (mode === 'auto') pre.push(askQuestionHook);
+  if (mode === 'auto') pre.push((input, toolUseID, options) => askQuestionHook(run, input, toolUseID, options));
   return pre.length ? { PreToolUse: [{ hooks: pre }] } : undefined;
 }
 
-/**
- * Shared permission state for headless auto-continue runs. A tool prompt during
- * an auto-resume has no originating browser socket, so it is surfaced to — and
- * answered by — any connected client through this module-level state rather than
- * hanging on a socket that was never open.
- */
-export const autoResumeState = { pendingPermissions: new Map() };
-
-/**
- * Resolve a prompt the user answered. The prompt may belong to this client's run
- * or to a headless resume, which any tab may answer.
- */
-export function resolvePermission(state, id, decision) {
-  const entry = state.pendingPermissions.get(id) || autoResumeState.pendingPermissions.get(id);
-  if (!entry) return false;
-  state.pendingPermissions.delete(id);
-  autoResumeState.pendingPermissions.delete(id);
+/** Resolve a prompt the user answered, wherever its run lives. */
+export function resolvePermission(id, decision) {
+  const run = findRunByPendingId('pendingPermissions', id);
+  if (!run) return false;
+  const entry = run.pendingPermissions.get(id);
+  run.pendingPermissions.delete(id);
   entry.resolve(decision);
   return true;
 }
 
 /**
  * Switching to a more permissive mode mid-prompt should not leave a card on
- * screen that the new mode would now allow — across every tab, and including a
- * headless resume's prompt.
+ * screen that the new mode would now allow — scoped to the one run this
+ * happened in, not every run across every tab.
  */
-export function resolvePromptsAllowedBy(mode) {
+export function resolvePromptsAllowedBy(run, mode) {
   if (mode !== 'bypass' && mode !== 'acceptEdits') return;
   const permits = (toolName) => mode === 'bypass' || EDIT_TOOLS.has(toolName);
 
-  for (const conn of connections) {
-    const pending = conn._state?.pendingPermissions;
-    if (!pending) continue;
-    for (const [id, entry] of pending) {
-      if (!permits(entry.toolName)) continue;
-      pending.delete(id);
-      entry.resolve('allow');
-      send(conn, { type: 'permission_resolved', id });
-    }
-  }
-  for (const [id, entry] of autoResumeState.pendingPermissions) {
+  for (const [id, entry] of run.pendingPermissions) {
     if (!permits(entry.toolName)) continue;
-    autoResumeState.pendingPermissions.delete(id);
+    run.pendingPermissions.delete(id);
     entry.resolve('allow');
-    broadcast({ type: 'permission_resolved', id });
+    sendToSessionOrBroadcast(run.sessionId, { type: 'permission_resolved', id });
   }
 }
 
 /**
  * Build the canUseTool for one run.
  *
- * It reads `runtime.activePermMode` at call time rather than closing over the
- * mode it was built with, which is what makes switching modes mid-prompt take
- * effect immediately.
+ * It reads `run.permMode` at call time rather than closing over the mode it
+ * was built with, which is what makes switching modes mid-prompt take effect
+ * immediately.
  */
-export function makeCanUseTool(ws, state) {
+export function makeCanUseTool(ws, run) {
   return (toolName, input, options) => {
     // A question is Claude asking the human something, not an action needing
     // approval — it never reaches the permission modes below.
     if (toolName === 'AskUserQuestion') {
-      return askQuestion(input, options.signal).then((answer) => formatQuestionDenial(input, answer));
+      return askQuestion(run, input, options.signal).then((answer) => formatQuestionDenial(input, answer));
     }
 
-    const mode = runtime.activePermMode;
+    const mode = run.permMode;
     if (mode === 'bypass' || (mode === 'acceptEdits' && EDIT_TOOLS.has(toolName))) {
       return Promise.resolve({ behavior: 'allow', updatedInput: input });
     }
@@ -175,9 +164,10 @@ export function makeCanUseTool(ws, state) {
       if (ws.readyState === 1) {
         send(ws, req);
       } else if (connections.size > 0) {
-        // Headless run (e.g. auto-continue): no originating socket, so ask
-        // whichever tabs are connected.
-        broadcast(req);
+        // No live originating socket (it navigated away, or this is a headless
+        // auto-continue resume): ask whoever is viewing this session, or every
+        // tab if nobody is.
+        sendToSessionOrBroadcast(run.sessionId, req);
       } else {
         log('INFO', `permission needed for ${toolName} but no client is connected — denying`);
         resolve({ behavior: 'deny', message: 'No interactive client connected to approve this tool.' });
@@ -196,9 +186,9 @@ export function makeCanUseTool(ws, state) {
         }
       };
 
-      state.pendingPermissions.set(id, { toolName, resolve: finish });
+      run.pendingPermissions.set(id, { toolName, resolve: finish });
       options.signal.addEventListener('abort', () => {
-        state.pendingPermissions.delete(id);
+        run.pendingPermissions.delete(id);
         resolve({ behavior: 'deny', message: 'Aborted' });
       }, { once: true });
     });

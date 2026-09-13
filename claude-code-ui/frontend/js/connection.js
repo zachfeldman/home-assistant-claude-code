@@ -18,7 +18,16 @@ import { appendAssistantText, appendCompactedDivider, appendErrorBubble, appendI
 // ── WebSocket ─────────────────────────────────────────────────────────────
 
 export function connect() {
-  S.ws = new WebSocket(wsUrl);
+  // Each browser tab remembers its own conversation in sessionStorage (private
+  // to this tab, gone when it closes) — passed as a query param so the server
+  // can hand back the right history/running-state in its very first reply
+  // instead of greeting with "new chat" and then switching a moment later.
+  // This is also what lets two tabs run two different conversations at once:
+  // the server tracks "what is this connection looking at" per-connection,
+  // not as one pointer shared by every tab (see ws-protocol.js).
+  const savedId = sessionStorage.getItem('activeSessionId');
+  const url = savedId ? `${wsUrl}?sessionId=${encodeURIComponent(savedId)}` : wsUrl;
+  S.ws = new WebSocket(url);
 
   S.ws.onopen    = () => { S.isConnected = true;  setStatus('connected'); };
   S.ws.onclose   = () => { S.isConnected = false; S.isRunning = false; setStatus('disconnected'); updateSendBtn(); setTimeout(connect, 3000); };
@@ -76,7 +85,15 @@ loginCodeForm.onsubmit = (e) => {
 export function handleServerMessage(msg) {
   switch (msg.type) {
     case 'connected': break;
-    case 'session':   break;
+
+    case 'session':
+      // A brand-new chat just got its real id from the server (only sent to
+      // the tab that started it — see run-query.js). Remember it so a reload
+      // or reconnect comes back to this same conversation.
+      S.activeSessionId = msg.id;
+      if (msg.id) sessionStorage.setItem('activeSessionId', msg.id);
+      else sessionStorage.removeItem('activeSessionId');
+      break;
 
     case 'config':
       // Server-provided default permission mode for new chats. The user's own
@@ -121,8 +138,13 @@ export function handleServerMessage(msg) {
       break;
 
     case 'sessions':
+      // The catalog of saved conversations is the same for every tab, but
+      // `activeId` — when present — is this connection's own view, sent only
+      // in direct replies (greet, sessions_list, session_switch/delete), never
+      // on the plain catalog-refresh broadcast after a run finishes elsewhere
+      // (which would otherwise stamp someone else's active id on this tab).
       S.sessions = Array.isArray(msg.sessions) ? msg.sessions : [];
-      S.activeSessionId = msg.activeId || null;
+      if (msg.activeId !== undefined) S.activeSessionId = msg.activeId;
       if (!sessionsPanel.classList.contains('hidden')) renderSessions();
       break;
 
@@ -134,8 +156,13 @@ export function handleServerMessage(msg) {
       break;
 
     case 'cleared':
+      // Only ever sent directly to the one tab affected (its viewed session was
+      // deleted, or it asked for a session that no longer exists) — never
+      // broadcast, so it is always safe to reset this tab's own pointer too.
       clearScreen();
       S.isRunning = false;
+      S.activeSessionId = null;
+      sessionStorage.removeItem('activeSessionId');
       updateSendBtn();
       break;
 

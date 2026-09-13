@@ -9,6 +9,15 @@
  *
  * The state is server-owned and persisted, because the whole point is that the
  * resume fires with no browser open.
+ *
+ * There is still only one `pending`/`offer` record, not one per session: two
+ * different conversations both exhausting the 5-hour quota at once is rare
+ * enough that a second limit hit simply replaces whatever the first scheduled,
+ * same as it always has. What changed is that both records now carry an
+ * explicit `sessionId` and are checked against that *specific* session's own
+ * run (via `findRunBySessionId`) rather than a single global "active" pointer,
+ * so this subsystem works correctly in a world where other, unrelated
+ * conversations may be running at the same time.
  */
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import {
@@ -17,9 +26,9 @@ import {
 } from './config.js';
 import { log, vlog } from './log.js';
 import { broadcast } from './broadcast.js';
-import { runtime } from './state.js';
+import { findRunBySessionId } from './state.js';
 import { isSubscriptionAuth } from './auth.js';
-import { autoResumeState } from './permissions.js';
+import { getLastUsedSessionId } from './sessions.js';
 
 /**
  * `enabled` is the user toggle; `pending` is a scheduled resume; `offer` is the
@@ -53,11 +62,11 @@ export function save() {
   catch (e) { console.warn('Could not save auto-continue state:', e.message); }
 }
 
-/** The offer, if it still means anything: same session, and not long past. */
-export function liveLimitOffer() {
+/** The offer, if it still means anything: for this session, and not long past. */
+export function liveLimitOffer(sessionId) {
   const o = autoContinue.offer;
-  if (!o || !runtime.activeSessionId) return null;
-  if (o.sessionId && o.sessionId !== runtime.activeSessionId) return null;
+  if (!o || !sessionId) return null;
+  if (o.sessionId && o.sessionId !== sessionId) return null;
   if (Date.now() > o.resetsAt * 1000 + LIMIT_OFFER_GRACE_MS) return null;
   return o;
 }
@@ -68,6 +77,12 @@ export function clearLimitOffer(reason) {
   save();
   vlog(`limit offer cleared (${reason})`);
   broadcast({ type: 'limit_offer_cleared' });
+}
+
+/** Only clear the offer if it belongs to this session — a prompt or new chat
+ *  in an unrelated conversation must not wipe out someone else's offer. */
+export function clearLimitOfferIfSession(sessionId, reason) {
+  if (autoContinue.offer?.sessionId === sessionId) clearLimitOffer(reason);
 }
 
 function clearTimer() {
@@ -103,29 +118,35 @@ export function cancel(reason) {
   broadcast({ type: 'auto_continue_cancelled', reason });
 }
 
+/** Only cancel if the pending resume belongs to this session. */
+export function cancelIfSession(sessionId, reason) {
+  if (autoContinue.pending?.sessionId === sessionId) cancel(reason);
+}
+
 function fire() {
   clearTimer();
   const pending = autoContinue.pending;
   if (!pending) return;
   if (!autoContinue.enabled) return cancel('disabled');
   if (!isSubscriptionAuth()) return cancel('not-subscription');
-  if (!runtime.activeSessionId) return cancel('no-active-session');
-  // A run is somehow already active — wait and retry rather than overlap it.
-  if (runtime.activeQuery) { timer = setTimeout(fire, 30000); return; }
+  if (!pending.sessionId) return cancel('no-session');
+  // That session already has a run somehow — wait and retry rather than overlap it.
+  if (findRunBySessionId(pending.sessionId)) { timer = setTimeout(fire, 30000); return; }
 
   autoContinue.pending = null;
   save();
-  log('INFO', `auto-continue: resuming session ${runtime.activeSessionId} (attempt ${pending.attempts})`);
+  log('INFO', `auto-continue: resuming session ${pending.sessionId} (attempt ${pending.attempts})`);
   broadcast({ type: 'auto_continue_resuming', attempts: pending.attempts });
 
-  // Headless run: a fake never-open socket, so send() no-ops and it is not in
-  // `connections`. Its user message still broadcasts to real tabs.
-  runQuery({ readyState: 3 }, autoResumeState, {
+  // Headless run: a fake never-open socket, so send() no-ops. Its user message
+  // still reaches any tab actually viewing this session (see run-query.js).
+  runQuery({ readyState: 3 }, { pendingRunId: null }, {
     text: AUTO_CONTINUE_PROMPT,
     permissionMode: pending.permissionMode,
     model: pending.model,
     effort: pending.effort,
     autoAttempts: pending.attempts,
+    sessionId: pending.sessionId,
   });
 }
 
@@ -140,11 +161,12 @@ export function setEnabled(enabled) {
 
   if (!autoContinue.enabled) return cancel('disabled');
 
-  const offer = liveLimitOffer();
-  if (offer && isSubscriptionAuth() && !autoContinue.pending && !runtime.activeQuery) {
+  const o = autoContinue.offer;
+  const stillLive = o && Date.now() <= o.resetsAt * 1000 + LIMIT_OFFER_GRACE_MS;
+  if (stillLive && isSubscriptionAuth() && !autoContinue.pending && !findRunBySessionId(o.sessionId)) {
     autoContinue.offer = null;
     broadcast({ type: 'limit_offer_cleared' });
-    schedule(offer);
+    schedule(o);
   }
 }
 
@@ -154,7 +176,7 @@ export function setEnabled(enabled) {
  * enough to schedule one if the user turns the toggle on after reading the
  * notice.
  */
-export function handleLimitHit(limitHit, { model, effort, permissionMode, autoAttempts }) {
+export function handleLimitHit(limitHit, { model, effort, permissionMode, autoAttempts, sessionId }) {
   const supported = isSubscriptionAuth();
   const willResume = autoContinue.enabled && supported && autoAttempts < AUTO_CONTINUE_MAX_ATTEMPTS;
 
@@ -182,6 +204,7 @@ export function handleLimitHit(limitHit, { model, effort, permissionMode, autoAt
         effort: effort || null,
         permissionMode,
         attempts,
+        sessionId,
       });
     }
     return;
@@ -195,7 +218,7 @@ export function handleLimitHit(limitHit, { model, effort, permissionMode, autoAt
     effort: effort || null,
     permissionMode,
     attempts: autoAttempts + 1,
-    sessionId: runtime.activeSessionId,
+    sessionId,
   };
   save();
   broadcast({ type: 'limit_offer', resetsAt: limitHit.resetsAt, rateLimitType: limitHit.rateLimitType, supported });
@@ -204,10 +227,18 @@ export function handleLimitHit(limitHit, { model, effort, permissionMode, autoAt
 /**
  * Re-arm a resume scheduled before a restart (it fires almost immediately if its
  * reset elapsed while we were down); otherwise drop a now-ineligible pending.
+ *
+ * A `pending` persisted by a version of this app from before per-session
+ * tracking existed has no `sessionId` of its own — back then there was only
+ * ever one conversation, so it implicitly meant whichever one that was. The
+ * last-used session (sessions.js, loaded just before this runs) is exactly
+ * that implicit target, so a missing `sessionId` is backfilled from it rather
+ * than treated as ineligible.
  */
 export function rearmOnBoot() {
   if (!autoContinue.pending) return;
-  if (autoContinue.enabled && isSubscriptionAuth() && runtime.activeSessionId &&
+  if (!autoContinue.pending.sessionId) autoContinue.pending.sessionId = getLastUsedSessionId();
+  if (autoContinue.enabled && isSubscriptionAuth() && autoContinue.pending.sessionId &&
       autoContinue.pending.attempts <= AUTO_CONTINUE_MAX_ATTEMPTS) {
     schedule(autoContinue.pending);
   } else {

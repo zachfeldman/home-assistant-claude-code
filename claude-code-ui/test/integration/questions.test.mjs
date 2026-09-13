@@ -117,15 +117,30 @@ describe('answering a question in one tab', () => {
   before(async () => { h = await startServer({ scenario: { runs: [{ steps: [askStep] }] } }); });
   after(async () => { await h.stop(); });
 
-  test('closes the card in the others', async () => {
+  // Deliberately changed behavior: `b` here never switched to `a`'s
+  // conversation — which did not even exist yet when `b` connected — so under
+  // the per-tab session model it correctly sees nothing from it. What is
+  // unchanged: a tab that DOES switch to that conversation is shown the
+  // question still waiting (replayed, same as a reconnect), and answering it
+  // from either viewer closes it on every tab currently looking at that run.
+  test('an unrelated idle tab sees nothing; a tab that switches to it can see and close the question everywhere', async () => {
     const a = await h.connect();
     const b = await h.connect();
     await Promise.all([a.waitFor('history'), b.waitFor('history')]);
     a.send({ type: 'prompt', text: 'which room?', permissionMode: 'ask' });
-    const dialog = await b.waitFor('user_dialog');
+    const dialog = await a.waitFor('user_dialog');
+    const sessionId = (await a.waitFor('session')).id;
+
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(b.all('user_dialog').length, 0, 'b never switched to this conversation, so it saw nothing');
+
+    b.send({ type: 'session_switch', id: sessionId });
+    const replayed = await b.waitFor('user_dialog');
+    assert.equal(replayed.id, dialog.id, 'switching in replays the question still waiting on that run');
+
     a.send({ type: 'user_dialog_response', id: dialog.id, result: { answers: { Room: 'Hall' } } });
     const cancelled = await b.waitFor('user_dialog_cancelled');
-    assert.equal(cancelled.id, dialog.id);
+    assert.equal(cancelled.id, dialog.id, 'answering in a closes the card on every other viewer, including b');
   });
 });
 
