@@ -1,3 +1,6 @@
+## 1.11.6
+- **Push-to-talk.** Hold Space, while the message box is empty, to transcribe speech into it via the browser's own SpeechRecognition — release to stop, review, and send as usual (nothing auto-sends). Once the box has anything typed in it, Space goes back to just being a space, so this never gets in the way of normal typing. Browser-only: no audio leaves your device, nothing server-side changed. Not supported everywhere (Safari's coverage has historically been inconsistent), and if this app is showing through Home Assistant's ingress iframe, microphone access depends on permissions granted to the *Home Assistant* page, not this one — a denial says so rather than failing silently
+
 ## 1.11.5
 - No app changes. `interactions.test.mjs`'s remaining new test asserted the run it abandoned would leave a transcript file on disk — CI's real Chrome caught that this harness's scripted SDK stub never writes one (that's the real Agent SDK's job, entirely absent from these tests), so it always timed out. Rewritten to switch a second connection into the abandoned session and wait for its `result` over the wire instead, the same idiom `test/integration/questions.test.mjs` already established for "does an unwatched run's state reach a tab that switches in"
 

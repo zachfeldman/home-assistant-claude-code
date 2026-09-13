@@ -8,6 +8,7 @@ import { resizeTextarea, updateSendBtn } from './composer.js';
 import { acBanner, acBannerCancel, acBannerEnable, acBannerText, autoContinueToggle, inputForm, messagesEl, permModeSelect, promptInput, settingsBtn, settingsPanel } from './dom.js';
 import { scrollBottom } from './scroll.js';
 import { endToolGroup } from './transcript.js';
+import { isRecording, startVoiceInput, stopVoiceInput, voiceSupported } from './voice.js';
 
 export let acCountdownTimer = null;
 
@@ -129,7 +130,10 @@ promptInput.oninput = () => {
   localStorage.setItem('draft', promptInput.value);
 };
 
-promptInput.onblur = () => setTimeout(hideCmdMenu, 120);
+promptInput.onblur = () => {
+  setTimeout(hideCmdMenu, 120);
+  stopVoiceInput();   // a held key's own keyup can be missed if focus moves elsewhere first
+};
 
 promptInput.onkeydown = (e) => {
   if (isMenuOpen()) {
@@ -141,6 +145,15 @@ promptInput.onkeydown = (e) => {
       return;
     }
     if (e.key === 'Escape')    { e.preventDefault(); hideCmdMenu(); return; }
+  }
+  // Push-to-talk: held only while the box is empty, so it never fights typing
+  // an actual space. isRecording() (not just the empty check) keeps every
+  // repeat of a still-held key from also inserting a space once the live
+  // transcript has made the box non-empty.
+  if (voiceSupported && e.code === 'Space' && (isRecording() || !promptInput.value)) {
+    e.preventDefault();
+    startVoiceInput();
+    return;
   }
   // Plain Enter sends. Ctrl/Cmd+Enter inserts a newline instead — done by hand
   // rather than left to the textarea's own default action, because Chrome (unlike
@@ -157,4 +170,8 @@ promptInput.onkeydown = (e) => {
     promptInput.selectionStart = promptInput.selectionEnd = start + 1;
     promptInput.dispatchEvent(new Event('input'));   // re-run resize/draft-save/send-button state
   }
+};
+
+promptInput.onkeyup = (e) => {
+  if (e.code === 'Space') stopVoiceInput();
 };
