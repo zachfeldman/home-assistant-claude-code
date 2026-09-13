@@ -1,3 +1,6 @@
+## 1.11.7
+- No app changes. `voice.test.mjs`'s own fixture put a leading space on an interim transcript fragment, which — added to the explicit separator `voice.js` already joins fragments with — doubled up and failed the assertion, which in turn skipped the `keyboard.up('Space')` after it, leaving the *next* test to find recording already stuck on and its own Space press silently swallowed (a real-looking but unrelated second failure). Fixed the fixture and wrapped both tests that hold Space in `try/finally` so a future assertion failure releases the key regardless, rather than cascading into whatever runs next
+
 ## 1.11.6
 - **Push-to-talk.** Hold Space, while the message box is empty, to transcribe speech into it via the browser's own SpeechRecognition — release to stop, review, and send as usual (nothing auto-sends). Once the box has anything typed in it, Space goes back to just being a space, so this never gets in the way of normal typing. Browser-only: no audio leaves your device, nothing server-side changed. Not supported everywhere (Safari's coverage has historically been inconsistent), and if this app is showing through Home Assistant's ingress iframe, microphone access depends on permissions granted to the *Home Assistant* page, not this one — a denial says so rather than failing silently
 

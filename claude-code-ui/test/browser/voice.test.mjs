@@ -58,11 +58,17 @@ describe('push-to-talk', { skip }, () => {
   test('holding Space on an empty box starts recording and shows it', async () => {
     await page.focus('#prompt-input');
     await page.keyboard.down('Space');
-    await page.waitForFunction(
-      () => document.getElementById('prompt-input').classList.contains('listening'), { timeout: 2000 });
-    assert.match(await page.$eval('#prompt-input', (el) => el.placeholder), /Listening/);
-    assert.equal(await page.evaluate(() => window.__voiceFake.started), true);
-    await page.keyboard.up('Space');
+    try {
+      await page.waitForFunction(
+        () => document.getElementById('prompt-input').classList.contains('listening'), { timeout: 2000 });
+      assert.match(await page.$eval('#prompt-input', (el) => el.placeholder), /Listening/);
+      assert.equal(await page.evaluate(() => window.__voiceFake.started), true);
+    } finally {
+      // See the equivalent finally below: guarantees the next test (which
+      // relies on the key already having been released) isn't left waiting
+      // on a release that an assertion failure here would otherwise skip.
+      await page.keyboard.up('Space');
+    }
   });
 
   test('releasing Space stops it and restores the placeholder', async () => {
@@ -76,32 +82,42 @@ describe('push-to-talk', { skip }, () => {
   test('interim and final results land in the box live', async () => {
     await page.focus('#prompt-input');
     await page.keyboard.down('Space');
-    await page.waitForFunction(
-      () => document.getElementById('prompt-input').classList.contains('listening'), { timeout: 2000 });
+    try {
+      await page.waitForFunction(
+        () => document.getElementById('prompt-input').classList.contains('listening'), { timeout: 2000 });
 
-    // One interim-only event, matching how a real recognizer streams a guess
-    // before committing to it.
-    await page.evaluate(() => {
-      window.__voiceFake.onresult({
-        resultIndex: 0,
-        results: [Object.assign([{ transcript: 'turn on the ' }], { isFinal: false })],
+      // One interim-only event, matching how a real recognizer streams a guess
+      // before committing to it.
+      await page.evaluate(() => {
+        window.__voiceFake.onresult({
+          resultIndex: 0,
+          results: [Object.assign([{ transcript: 'turn on the ' }], { isFinal: false })],
+        });
       });
-    });
-    assert.equal(await page.$eval('#prompt-input', (el) => el.value), 'turn on the');
+      assert.equal(await page.$eval('#prompt-input', (el) => el.value), 'turn on the');
 
-    // Then the final result for that same utterance, plus a fresh interim tail.
-    await page.evaluate(() => {
-      window.__voiceFake.onresult({
-        resultIndex: 0,
-        results: [
-          Object.assign([{ transcript: 'turn on the hall light' }], { isFinal: true }),
-          Object.assign([{ transcript: ' please' }], { isFinal: false }),
-        ],
+      // Then the final result for that same utterance, plus a fresh interim tail
+      // — voice.js itself joins baseText/interim with a space, so this fragment
+      // (unlike the first, which the browser's own value already trims) must
+      // not start with one of its own or the join doubles up.
+      await page.evaluate(() => {
+        window.__voiceFake.onresult({
+          resultIndex: 0,
+          results: [
+            Object.assign([{ transcript: 'turn on the hall light' }], { isFinal: true }),
+            Object.assign([{ transcript: 'please' }], { isFinal: false }),
+          ],
+        });
       });
-    });
-    assert.equal(await page.$eval('#prompt-input', (el) => el.value), 'turn on the hall light please');
-
-    await page.keyboard.up('Space');
+      assert.equal(await page.$eval('#prompt-input', (el) => el.value), 'turn on the hall light please');
+    } finally {
+      // Guarantee the key is logically released even if an assertion above
+      // throws — otherwise recording stays stuck open and poisons every test
+      // after this one (their own Space presses would find isRecording()
+      // already true and skip inserting a literal space, a confusing second
+      // failure with nothing to do with whatever this test actually got wrong).
+      await page.keyboard.up('Space');
+    }
     await page.waitForFunction(
       () => !document.getElementById('prompt-input').classList.contains('listening'), { timeout: 2000 });
     // The transcript stays in the box for review — nothing here auto-sends it.
