@@ -211,7 +211,11 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.evaluateOnNewDocument(installFake);
     await page.evaluateOnNewDocument(installInsecureContext);
-    await page.goto(h.baseUrl, { waitUntil: 'networkidle0' });
+    // A realistic ingress path (server-harness's catch-all route serves the
+    // app the same regardless, matching real ingress), not the bare origin —
+    // this is exactly what the link needs to preserve so it reopens this
+    // chat, not the bare Nabu Casa domain's default dashboard.
+    await page.goto(`${h.baseUrl}/api/hassio_ingress/fake-token/`, { waitUntil: 'networkidle0' });
   });
   after(async () => {
     if (browser) await browser.close();
@@ -219,7 +223,7 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     if (ha) await ha.close();
   });
 
-  test('links straight to it on the very first attempt', async () => {
+  test('links straight back to this app (not the bare domain) on the very first attempt', async () => {
     // Prefetched on connect (maybePrefetchNabuCasaUrl(), fired from
     // connection.js's onopen) well before this test's own interaction, and
     // startVoiceInput() awaits up to 1.2s for it regardless — either way,
@@ -230,8 +234,9 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     await page.keyboard.up('Space');
     await page.waitForSelector('.error-bubble a', { timeout: 2000 });
     const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent, target: a.target }));
-    assert.equal(link.href, 'https://abc123.ui.nabu.casa/');
-    assert.equal(link.text, 'abc123.ui.nabu.casa');
+    assert.equal(link.href, 'https://abc123.ui.nabu.casa/api/hassio_ingress/fake-token/',
+      'the bare domain would land on the default dashboard, not this chat');
+    assert.equal(link.text, 'abc123.ui.nabu.casa', 'link text stays just the domain — the path is implicit');
     assert.equal(link.target, '_blank', 'a genuinely external destination, unlike the Cloud-settings link above');
     assert.match(await page.$eval('.error-bubble', (el) => el.textContent), /needs HTTPS/);
   });

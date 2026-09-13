@@ -1,3 +1,6 @@
+## 1.11.12
+- **The Nabu Casa remote-access link now reopens this app itself, not your default dashboard.** It was pointing at the bare `https://*.ui.nabu.casa` domain, which — same as typing just a domain into any browser — lands on whatever your home dashboard is. Now keeps this page's own path (its ingress URL) alongside the swapped-in HTTPS domain, so clicking it takes you straight back to this same chat, reached securely, ready to actually try push-to-talk again
+
 ## 1.11.11
 - **Fixed the Home Assistant Cloud settings link landing on the dashboard instead of Cloud settings.** `/config/cloud` (added in 1.11.10) was actually the right path all along — confirmed against Home Assistant's own "my link" redirect registry — but the link opened it with `target="_blank"`, a brand-new disconnected browser tab that has to cold-boot the entire HA frontend from scratch, which typically loses the requested deep link to its own login/redirect flow and lands on the dashboard instead. Now `target="_top"`: breaks out of this app's (unsandboxed — confirmed against Home Assistant's actual ingress panel source, `ha-panel-app.ts`) iframe and reuses the already-authenticated HA tab directly, so its router just switches views in place. The Nabu Casa remote-access link (a genuinely separate, external destination) is unaffected and still opens in a new tab
 

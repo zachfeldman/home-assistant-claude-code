@@ -15,15 +15,17 @@
  *     is the single most common cause for a local Home Assistant instance
  *     reached as plain `http://homeassistant.local`. Checked directly via
  *     `isSecureContext` below, so the error names this instead of guessing —
- *     and links either to Nabu Casa's own (already-HTTPS) remote-access URL,
- *     if already connected, or to the Home Assistant Cloud settings page to go
- *     connect it, rather than just describing what to go do. The URL comes
- *     from the server (HA's own Cloud status is WebSocket-only, not something
- *     this page can ask HA for directly) — prefetched as soon as the
- *     connection opens (maybePrefetchNabuCasaUrl(), called from
- *     connection.js) so it is normally already known by the time anyone
- *     actually holds Space, with a short bounded wait as a fallback for a
- *     first attempt that beats the round trip.
+ *     and links either straight back to *this app*, reached through Nabu
+ *     Casa's own (already-HTTPS) remote-access URL if already connected (the
+ *     bare domain would land on whatever the default dashboard is, not this
+ *     chat — see location.pathname below), or to the Home Assistant Cloud
+ *     settings page to go connect it if not, rather than just describing what
+ *     to go do. The URL comes from the server (HA's own Cloud status is
+ *     WebSocket-only, not something this page can ask HA for directly) —
+ *     prefetched as soon as the connection opens (maybePrefetchNabuCasaUrl(),
+ *     called from connection.js) so it is normally already known by the time
+ *     anyone actually holds Space, with a short bounded wait as a fallback
+ *     for a first attempt that beats the round trip.
  *   - Denied at the browser/OS level. Ordinary "no mic access" — fixable from
  *     the browser's own site-permission UI, or (on some OSes) system privacy
  *     settings, same as any other site asking for the microphone.
@@ -117,9 +119,12 @@ export async function startVoiceInput() {
     // while this one was awaiting) already found shouldShowVoiceError() closed
     // and returned — this is always the one call that gets to render.
     if (url) {
+      // The bare domain would land on whatever the default dashboard is —
+      // keep the current path (this app's own ingress URL) so the link
+      // reopens this same chat, securely, not somewhere else entirely.
       appendErrorBubbleWithLink(
-        `${intro} Your Nabu Casa remote-access URL is already HTTPS:`,
-        url,
+        `${intro} Your Nabu Casa remote-access URL is already HTTPS — reopen this chat through it:`,
+        url + location.pathname,
         url.replace(/^https:\/\//, ''),
       );
     } else {
