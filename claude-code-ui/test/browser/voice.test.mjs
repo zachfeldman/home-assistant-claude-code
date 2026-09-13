@@ -211,11 +211,15 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.evaluateOnNewDocument(installFake);
     await page.evaluateOnNewDocument(installInsecureContext);
-    // A realistic ingress path (server-harness's catch-all route serves the
-    // app the same regardless, matching real ingress), not the bare origin —
-    // this is exactly what the link needs to preserve so it reopens this
-    // chat, not the bare Nabu Casa domain's default dashboard.
-    await page.goto(`${h.baseUrl}/api/hassio_ingress/fake-token/`, { waitUntil: 'networkidle0' });
+    // Connect at the root — dom.js derives the WebSocket URL from
+    // location.pathname too, and this harness's server (unlike Supervisor's
+    // real ingress proxy) has no path-stripping in front of its /ws route, so
+    // actually navigating to an ingress-style path would break the socket
+    // itself. pushState afterwards changes what location.pathname reports
+    // without a real navigation — the already-open connection is untouched,
+    // and it is only the link-building logic under test that reads the path.
+    await page.goto(h.baseUrl, { waitUntil: 'networkidle0' });
+    await page.evaluate(() => history.pushState(null, '', '/api/hassio_ingress/fake-token/'));
   });
   after(async () => {
     if (browser) await browser.close();

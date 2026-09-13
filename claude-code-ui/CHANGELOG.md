@@ -1,3 +1,6 @@
+## 1.11.13
+- No app changes. 1.11.12's own new test tried to exercise a realistic ingress-style path by actually navigating there — but this test harness's server, unlike Supervisor's real ingress proxy, has no path-stripping in front of its `/ws` route, so that broke the page's own WebSocket connection outright (dom.js derives the socket URL from `location.pathname` too) and the test just timed out waiting for a bubble that could never appear. Connects at the root instead, then uses `history.pushState` to change what `location.pathname` reports without a real navigation — the already-open connection is untouched, and only the link-building logic under test reads the path
+
 ## 1.11.12
 - **The Nabu Casa remote-access link now reopens this app itself, not your default dashboard.** It was pointing at the bare `https://*.ui.nabu.casa` domain, which — same as typing just a domain into any browser — lands on whatever your home dashboard is. Now keeps this page's own path (its ingress URL) alongside the swapped-in HTTPS domain, so clicking it takes you straight back to this same chat, reached securely, ready to actually try push-to-talk again
 
