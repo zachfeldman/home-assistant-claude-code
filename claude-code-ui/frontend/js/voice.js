@@ -15,11 +15,15 @@
  *     is the single most common cause for a local Home Assistant instance
  *     reached as plain `http://homeassistant.local`. Checked directly via
  *     `isSecureContext` below, so the error names this instead of guessing —
- *     and, if Nabu Casa remote access is already connected, links straight to
- *     its (already-HTTPS) URL rather than just describing what to set up. That
- *     URL comes from the server (HA's own Cloud status is WebSocket-only, not
- *     something this page can ask HA for directly), asked for lazily and only
- *     once this error has actually happened — see requestNabuCasaUrl() below.
+ *     and links either to Nabu Casa's own (already-HTTPS) remote-access URL,
+ *     if already connected, or to the Home Assistant Cloud settings page to go
+ *     connect it, rather than just describing what to go do. The URL comes
+ *     from the server (HA's own Cloud status is WebSocket-only, not something
+ *     this page can ask HA for directly) — prefetched as soon as the
+ *     connection opens (maybePrefetchNabuCasaUrl(), called from
+ *     connection.js) so it is normally already known by the time anyone
+ *     actually holds Space, with a short bounded wait as a fallback for a
+ *     first attempt that beats the round trip.
  *   - Denied at the browser/OS level. Ordinary "no mic access" — fixable from
  *     the browser's own site-permission UI, or (on some OSes) system privacy
  *     settings, same as any other site asking for the microphone.
@@ -55,15 +59,40 @@ function shouldShowVoiceError(key) {
   return true;
 }
 
-// Asked once, the first time it would actually be useful (this same insecure-
-// context error, below) — not on every page load, since most people are on
-// HTTPS and would never need it. S.nabuCasaUrl starts undefined; connection.js
-// fills it in from the server's reply.
+// Asked at most once per page load — not unconditionally on every connect,
+// since most people are on HTTPS and would never need it. S.nabuCasaUrl
+// starts undefined; connection.js fills it in from the server's reply.
 let nabuCasaRequested = false;
 function requestNabuCasaUrl() {
   if (nabuCasaRequested || !S.ws || !S.isConnected) return;
   nabuCasaRequested = true;
   S.ws.send(JSON.stringify({ type: 'nabu_casa_url' }));
+}
+
+/** Called from connection.js's onopen — fires the request the moment it can,
+ *  well before a human could plausibly have noticed the page and tried
+ *  push-to-talk, so the answer is normally already in by their first attempt. */
+export function maybePrefetchNabuCasaUrl() {
+  if (!window.isSecureContext) requestNabuCasaUrl();
+}
+
+// A first attempt that beats the prefetch above (a very fast interaction, or a
+// slow/unreachable Home Assistant) still gets a real answer rather than
+// silently missing the link — just bounded, so a dead connection cannot hang
+// the error message indefinitely.
+const NABU_CASA_WAIT_MS = 1200;
+function resolveNabuCasaUrl() {
+  if (S.nabuCasaUrl !== undefined) return Promise.resolve(S.nabuCasaUrl);
+  requestNabuCasaUrl();
+  return new Promise((resolve) => {
+    const deadline = Date.now() + NABU_CASA_WAIT_MS;
+    const poll = () => {
+      if (S.nabuCasaUrl !== undefined) return resolve(S.nabuCasaUrl);
+      if (Date.now() >= deadline) return resolve(null);
+      setTimeout(poll, 50);
+    };
+    poll();
+  });
 }
 
 // Only worth advertising where it will actually do something — the same
@@ -77,26 +106,30 @@ let baseText = '';   // finalized transcript so far, separate from the live inte
 
 export function isRecording() { return recording; }
 
-export function startVoiceInput() {
+export async function startVoiceInput() {
   if (!voiceSupported || recording) return;
   if (!window.isSecureContext) {
-    if (shouldShowVoiceError('insecure-context')) {
-      const intro = `Voice input needs HTTPS — this page is loaded over ${location.protocol.replace(':', '')}, ` +
-        'and browsers refuse microphone access there entirely, for any site, with no per-site override.';
-      if (S.nabuCasaUrl) {
-        appendErrorBubbleWithLink(
-          `${intro} Your Nabu Casa remote-access URL is already HTTPS:`,
-          S.nabuCasaUrl,
-          S.nabuCasaUrl.replace(/^https:\/\//, ''),
-        );
-      } else {
-        appendErrorBubble(
-          `${intro} A local http:// address (even homeassistant.local) needs its own certificate ` +
-          '(a reverse proxy, or Settings → System → Network) before this can work.',
-        );
-      }
+    if (!shouldShowVoiceError('insecure-context')) return;
+    const intro = `Voice input needs HTTPS — this page is loaded over ${location.protocol.replace(':', '')}, ` +
+      'and browsers refuse microphone access there entirely, for any site, with no per-site override.';
+    const url = await resolveNabuCasaUrl();
+    // A second, near-simultaneous call (the OS auto-repeating a still-held key
+    // while this one was awaiting) already found shouldShowVoiceError() closed
+    // and returned — this is always the one call that gets to render.
+    if (url) {
+      appendErrorBubbleWithLink(
+        `${intro} Your Nabu Casa remote-access URL is already HTTPS:`,
+        url,
+        url.replace(/^https:\/\//, ''),
+      );
+    } else {
+      appendErrorBubbleWithLink(
+        `${intro} A local http:// address (even homeassistant.local) needs its own certificate — a reverse ` +
+        'proxy, or connecting Nabu Casa remote access, which is already HTTPS:',
+        `${location.origin}/config/cloud`,
+        'Home Assistant Cloud settings',
+      );
     }
-    requestNabuCasaUrl();
     return;
   }
   recording = true;

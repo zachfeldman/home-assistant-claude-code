@@ -1,3 +1,7 @@
+## 1.11.10
+- **The Nabu Casa link now shows on the very first HTTPS error, not the second.** It's prefetched the moment the connection opens (well before anyone could plausibly have noticed the page and reached for the microphone), and the error itself now waits up to 1.2s for that answer if it somehow hasn't landed yet — rather than firing the request only when the error first happens and showing the plain text that one time regardless
+- **No Nabu Casa connected? Now links to the Home Assistant Cloud settings page** (`/config/cloud`, same-origin since this app is ingress-only) **to go set it up**, instead of only mentioning it in passing text alongside the reverse-proxy option
+
 ## 1.11.9
 - **The HTTPS error links straight to your Nabu Casa remote-access URL, if one is already connected.** Home Assistant's Cloud status only exists over its own WebSocket API — nothing this page can ask for on its own — so the server now answers an on-demand request for it (`cloud/status`, cached 5 minutes), asked for the first time this error actually happens rather than on every page load. No URL configured or connected, or Cloud unreachable for any reason? Falls back to the same descriptive text as before, exactly as if this had never been asked
 - Shortened the identical-retry throttle from 8s to 4s — 8 was long enough that someone retrying every second or two would hit a stretch of apparent silence in between

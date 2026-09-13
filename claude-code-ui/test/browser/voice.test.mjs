@@ -166,13 +166,20 @@ describe('push-to-talk over an insecure origin', { skip }, () => {
   });
   after(async () => { if (browser) await browser.close(); if (h) await h.stop(); });
 
-  test('names HTTPS specifically, never starts a recognizer, and does not nag on every retry', async () => {
+  test('names HTTPS specifically on the very first attempt, links to Cloud settings, never starts a recognizer, and does not nag on every retry', async () => {
     await page.focus('#prompt-input');
 
+    // No SUPERVISOR_TOKEN in this describe block (no fake HA either), so the
+    // server resolves nabu_casa_url to null essentially immediately — this is
+    // the "no Nabu Casa" branch, exercised on the very first hold thanks to
+    // the prefetch on connect plus startVoiceInput's own bounded wait.
     await page.keyboard.down('Space');
     await page.keyboard.up('Space');
-    await page.waitForFunction(
-      () => /needs HTTPS/.test(document.getElementById('messages').textContent), { timeout: 2000 });
+    await page.waitForSelector('.error-bubble a', { timeout: 2000 });
+    const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent }));
+    assert.match(link.href, /\/config\/cloud$/);
+    assert.equal(link.text, 'Home Assistant Cloud settings');
+    assert.match(await page.$eval('.error-bubble', (el) => el.textContent), /needs HTTPS/);
     assert.equal(await page.$eval('#prompt-input', (el) => el.classList.contains('listening')), false,
       'must bail before ever starting a recognizer it cannot use');
     assert.equal(await page.evaluate(() => (window.__voiceFakeInstances || []).length), 0);
@@ -210,27 +217,20 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     if (ha) await ha.close();
   });
 
-  test('links straight to it once the server has answered', async () => {
+  test('links straight to it on the very first attempt', async () => {
+    // Prefetched on connect (maybePrefetchNabuCasaUrl(), fired from
+    // connection.js's onopen) well before this test's own interaction, and
+    // startVoiceInput() awaits up to 1.2s for it regardless — either way,
+    // there is no "too soon" case left to test for here, unlike a fixed
+    // fire-and-forget request would have had.
     await page.focus('#prompt-input');
-
-    // First attempt: the on-demand request has only just been fired, so this
-    // one is still the plain message — same as the no-Nabu-Casa case tested
-    // above, since voice.js cannot know the answer any sooner than this.
-    await page.keyboard.down('Space');
-    await page.keyboard.up('Space');
-    await page.waitForFunction(
-      () => /needs HTTPS/.test(document.getElementById('messages').textContent), { timeout: 2000 });
-    assert.equal(await page.$('.error-bubble a'), null, 'too soon for the server to have answered yet');
-
-    // Wait out the retry throttle, then hold again — the server's answer
-    // (a same-machine round trip) is certainly in by now, so this one links.
-    await new Promise((r) => setTimeout(r, 4300));
     await page.keyboard.down('Space');
     await page.keyboard.up('Space');
     await page.waitForSelector('.error-bubble a', { timeout: 2000 });
-    const link = await page.$eval('.error-bubble a:last-of-type', (a) => ({ href: a.href, text: a.textContent }));
+    const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent }));
     assert.equal(link.href, 'https://abc123.ui.nabu.casa/');
     assert.equal(link.text, 'abc123.ui.nabu.casa');
+    assert.match(await page.$eval('.error-bubble', (el) => el.textContent), /needs HTTPS/);
   });
 
   test('with a clean console', () => assert.deepEqual(errors, []));

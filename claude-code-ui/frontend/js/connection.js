@@ -14,6 +14,7 @@ import { renderSessions } from './sessions.js';
 import { setAutoContinueSupported } from './settings.js';
 import { hideThinking, showThinking } from './thinking.js';
 import { appendAssistantText, appendCompactedDivider, appendErrorBubble, appendInfoLine, appendResultLine, appendToolResult, appendToolUse, appendUserBubble, endToolGroup, renderHistory } from './transcript.js';
+import { maybePrefetchNabuCasaUrl } from './voice.js';
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ export function connect() {
   const url = savedId ? `${wsUrl}?sessionId=${encodeURIComponent(savedId)}` : wsUrl;
   S.ws = new WebSocket(url);
 
-  S.ws.onopen    = () => { S.isConnected = true;  setStatus('connected'); };
+  S.ws.onopen    = () => { S.isConnected = true;  setStatus('connected'); maybePrefetchNabuCasaUrl(); };
   S.ws.onclose   = () => { S.isConnected = false; S.isRunning = false; setStatus('disconnected'); updateSendBtn(); setTimeout(connect, 3000); };
   S.ws.onerror   = () => S.ws.close();
   S.ws.onmessage = (e) => handleServerMessage(JSON.parse(e.data));
