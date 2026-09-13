@@ -3,7 +3,7 @@
  * and the autocomplete menu that offers them.
  */
 import { S } from './state.js';
-import { requestNewSession, resizeTextarea, runUiCommand, updateSendBtn } from './composer.js';
+import { doNewSession, resizeTextarea, runUiCommand, updateSendBtn } from './composer.js';
 import { cmdMenu, messagesEl, newSessionBtn, promptInput, sessionsBtn, sessionsPanel } from './dom.js';
 import { updateCtxHint } from './model.js';
 
@@ -150,9 +150,9 @@ export function showHelp() {
   appendInfoBubble('Available commands:\n' + lines.join('\n'));
 }
 
-// The current session is preserved in the store (browsable via Sessions), so
-// requestNewSession only asks when a query is actively running.
-newSessionBtn.onclick = () => { requestNewSession(); };
+// A turn in progress in the abandoned session is not stopped — it keeps running
+// server-side and stays reachable from Sessions, so there is nothing to warn about.
+newSessionBtn.onclick = () => { doNewSession(); };
 
 sessionsBtn.onclick = (e) => {
   e.stopPropagation();
