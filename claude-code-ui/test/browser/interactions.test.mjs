@@ -9,8 +9,7 @@
  */
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
+import { existsSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 import { startServer, userLine, assistantLine } from '../helpers/server-harness.mjs';
 import { startFakeHa, TOKEN } from '../helpers/fake-ha.mjs';
@@ -405,19 +404,18 @@ describe('switching away from a chat while Claude is still working', { skip }, (
 
   test('the abandoned turn keeps running and finishes on its own', async () => {
     // Every tab moved on above, twice — nobody has been viewing this run's
-    // session for a while now. Read its transcript straight off disk (not the
-    // live WebSocket stream, which a newly-connecting viewer would only catch
-    // if it arrived while still subscribed) to prove it completed anyway.
+    // session for a while now. A second, independent connection that switches
+    // into it (same idiom as questions.test.mjs's "a tab that switches to it
+    // can see...") proves the run is still alive and finishes normally,
+    // unsupervised — sendToSession() only reaches connections viewing the
+    // session at the moment each event fires, so this only works because the
+    // run (1500ms) comfortably outlasts the two tests above (under 600ms).
     assert.ok(sid, 'the run should have been assigned a session id by the time it started');
 
-    const transcript = path.join(h.store, `${sid}.jsonl`);
-    const started = Date.now();
-    while (!existsSync(transcript) || !readFileSync(transcript, 'utf8').includes('done thinking')) {
-      if (Date.now() - started > 5000) {
-        assert.fail('the abandoned run never finished (or never persisted) on its own');
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    const spy = await h.connect();
+    await spy.waitFor('history');
+    spy.send({ type: 'session_switch', id: sid });
+    await spy.waitFor('result', { timeout: 4000 });
   });
 
   test('with a clean console', () => assert.deepEqual(errors, []));
