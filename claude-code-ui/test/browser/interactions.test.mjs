@@ -350,11 +350,13 @@ describe('a draft left in the box', { skip }, () => {
 // under the old single-run-per-app model; see git history before this comment
 // for that version.
 describe('switching away from a chat while Claude is still working', { skip }, () => {
-  let h, browser, page, errors;
+  let h, browser, page, errors, sid;
   before(async () => {
-    // A short run, so a later test can observe it actually finish unsupervised.
+    // Long enough that its own completion (which triggers a sessions-catalog
+    // broadcast, re-rendering the panel if open) does not land mid-click in the
+    // tests below; short enough for the last test not to wait around for it.
     h = await startServer({
-      scenario: { runs: [{ steps: [{ sleep: 300 }, { text: 'done thinking' }] }] },
+      scenario: { runs: [{ steps: [{ sleep: 1500 }, { text: 'done thinking' }] }] },
       sessions: {
         'bbbbbbbb-0000-0000-0000-000000000002': [userLine('the boiler again')],
       },
@@ -365,6 +367,9 @@ describe('switching away from a chat while Claude is still working', { skip }, (
     await page.click('#send-btn');
     await page.waitForFunction(
       () => document.getElementById('send-btn').classList.contains('stop'), { timeout: 5000 });
+    // Captured now: the tests below switch away (clearing/overwriting this tab's
+    // own sessionStorage pointer), so it would not be readable from there later.
+    sid = await page.evaluate(() => sessionStorage.getItem('activeSessionId'));
   });
   after(async () => { if (browser) await browser.close(); if (h) await h.stop(); });
 
@@ -403,7 +408,6 @@ describe('switching away from a chat while Claude is still working', { skip }, (
     // session for a while now. Read its transcript straight off disk (not the
     // live WebSocket stream, which a newly-connecting viewer would only catch
     // if it arrived while still subscribed) to prove it completed anyway.
-    const sid = await page.evaluate(() => sessionStorage.getItem('activeSessionId'));
     assert.ok(sid, 'the run should have been assigned a session id by the time it started');
 
     const transcript = path.join(h.store, `${sid}.jsonl`);

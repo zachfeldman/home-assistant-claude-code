@@ -142,10 +142,19 @@ promptInput.onkeydown = (e) => {
     }
     if (e.key === 'Escape')    { e.preventDefault(); hideCmdMenu(); return; }
   }
-  // Plain Enter sends; Ctrl/Cmd/Shift+Enter falls through to the textarea's own
-  // default behavior and inserts a newline instead.
+  // Plain Enter sends. Ctrl/Cmd+Enter inserts a newline instead — done by hand
+  // rather than left to the textarea's own default action, because Chrome (unlike
+  // Shift+Enter) does not treat a Ctrl-chorded Enter as a newline by default.
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     inputForm.dispatchEvent(new Event('submit'));
+    return;
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    const { selectionStart: start, selectionEnd: end } = promptInput;
+    promptInput.value = promptInput.value.slice(0, start) + '\n' + promptInput.value.slice(end);
+    promptInput.selectionStart = promptInput.selectionEnd = start + 1;
+    promptInput.dispatchEvent(new Event('input'));   // re-run resize/draft-save/send-button state
   }
 };
