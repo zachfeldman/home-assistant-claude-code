@@ -140,3 +140,49 @@ describe('push-to-talk', { skip }, () => {
 
   test('with a clean console', () => assert.deepEqual(errors, []));
 });
+
+// The harness itself serves over plain http://127.0.0.1 — a secure context
+// regardless of scheme, since 127.0.0.1/localhost are always exempt — so the
+// case that actually bit a real user (Home Assistant reached over plain HTTP,
+// no SSL) needs isSecureContext forced off deliberately rather than relying
+// on how this test server happens to be reached.
+const installInsecureContext = () => {
+  Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
+};
+
+describe('push-to-talk over an insecure origin', { skip }, () => {
+  let h, browser, page, errors;
+  before(async () => {
+    h = await startServer({});
+    browser = await puppeteer.launch({ executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+    page = await browser.newPage();
+    errors = [];
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.evaluateOnNewDocument(installFake);
+    await page.evaluateOnNewDocument(installInsecureContext);
+    await page.goto(h.baseUrl, { waitUntil: 'networkidle0' });
+  });
+  after(async () => { if (browser) await browser.close(); if (h) await h.stop(); });
+
+  test('names HTTPS specifically, never starts a recognizer, and does not nag on every retry', async () => {
+    await page.focus('#prompt-input');
+
+    await page.keyboard.down('Space');
+    await page.keyboard.up('Space');
+    await page.waitForFunction(
+      () => /needs HTTPS/.test(document.getElementById('messages').textContent), { timeout: 2000 });
+    assert.equal(await page.$eval('#prompt-input', (el) => el.classList.contains('listening')), false,
+      'must bail before ever starting a recognizer it cannot use');
+    assert.equal(await page.evaluate(() => (window.__voiceFakeInstances || []).length), 0);
+
+    const bubblesAfterFirst = await page.$$eval('.error-bubble', (els) => els.length);
+    await page.keyboard.down('Space');
+    await page.keyboard.up('Space');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(await page.$$eval('.error-bubble', (els) => els.length), bubblesAfterFirst,
+      'retrying an unfixable-by-retrying condition should not post a duplicate bubble');
+  });
+
+  test('with a clean console', () => assert.deepEqual(errors, []));
+});

@@ -1,3 +1,7 @@
+## 1.11.8
+- **Push-to-talk now names HTTPS specifically when that's the problem, instead of every hold-Space getting the same generic "access denied" bubble.** Browsers refuse microphone access on any plain-HTTP origin outright — no permission prompt, no per-site override, every single attempt fails identically — which is exactly what a Home Assistant instance reached as `http://homeassistant.local` (no SSL configured) hits every time. Checked directly via `isSecureContext` before ever touching the recognizer, so the message names the real cause and points at what actually fixes it (Nabu Casa remote access is already HTTPS; a local instance needs its own certificate — a reverse proxy, or Settings → System → Network)
+- Also stopped re-posting an identical error bubble on every retry of a condition retrying can't fix — was flooding the chat with copies of the same message
+
 ## 1.11.7
 - No app changes. `voice.test.mjs`'s own fixture put a leading space on an interim transcript fragment, which — added to the explicit separator `voice.js` already joins fragments with — doubled up and failed the assertion, which in turn skipped the `keyboard.up('Space')` after it, leaving the *next* test to find recording already stuck on and its own Space press silently swallowed (a real-looking but unrelated second failure). Fixed the fixture and wrapped both tests that hold Space in `try/finally` so a future assertion failure releases the key regardless, rather than cascading into whatever runs next
 
