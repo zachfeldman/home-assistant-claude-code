@@ -74,6 +74,7 @@ function greet(ws, state) {
     defaultPermMode: DEFAULT_PERMISSION_MODE,
     autoContinue: autoContinue.autoContinue.enabled,
     autoContinueSupported: isSubscriptionAuth(),
+    selfSlug: runtime.selfSlug,
   });
   send(ws, { type: 'auth_status', authenticated: isAuthenticated() && !runtime.credentialsExpired });
   if (runtime.credentialsExpired) send(ws, { type: 'auth_expired', subscription: isSubscriptionAuth() });

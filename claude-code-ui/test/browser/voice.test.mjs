@@ -202,8 +202,15 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
   before(async () => {
     ha = await startFakeHa({
       commands: { 'cloud/status': { remote_connected: true, remote_domain: 'abc123.ui.nabu.casa' } },
+      rest: { 'addons/self/info': { data: { slug: 'dafc670d_claude-code-ui' } } },
     });
-    h = await startServer({ env: { SUPERVISOR_TOKEN: TOKEN, HA_SUPERVISOR_URL: ha.supervisorUrl } });
+    h = await startServer({
+      env: { SUPERVISOR_TOKEN: TOKEN, HA_SUPERVISOR_URL: ha.supervisorUrl, VERBOSE_LOGGING: 'true' },
+    });
+    // refreshSelfSlug() runs fire-and-forget at server startup; wait for it
+    // before connecting, or the page's one-shot 'config' message could win
+    // the race and carry a still-null selfSlug forever (nothing re-sends it).
+    await h.waitForLog('self slug:');
     browser = await puppeteer.launch({ executablePath, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
     page = await browser.newPage();
     errors = [];
@@ -211,15 +218,7 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.evaluateOnNewDocument(installFake);
     await page.evaluateOnNewDocument(installInsecureContext);
-    // Connect at the root — dom.js derives the WebSocket URL from
-    // location.pathname too, and this harness's server (unlike Supervisor's
-    // real ingress proxy) has no path-stripping in front of its /ws route, so
-    // actually navigating to an ingress-style path would break the socket
-    // itself. pushState afterwards changes what location.pathname reports
-    // without a real navigation — the already-open connection is untouched,
-    // and it is only the link-building logic under test that reads the path.
     await page.goto(h.baseUrl, { waitUntil: 'networkidle0' });
-    await page.evaluate(() => history.pushState(null, '', '/api/hassio_ingress/fake-token/'));
   });
   after(async () => {
     if (browser) await browser.close();
@@ -238,8 +237,8 @@ describe('push-to-talk over an insecure origin, with Nabu Casa connected', { ski
     await page.keyboard.up('Space');
     await page.waitForSelector('.error-bubble a', { timeout: 2000 });
     const link = await page.$eval('.error-bubble a', (a) => ({ href: a.href, text: a.textContent, target: a.target }));
-    assert.equal(link.href, 'https://abc123.ui.nabu.casa/api/hassio_ingress/fake-token/',
-      'the bare domain would land on the default dashboard, not this chat');
+    assert.equal(link.href, 'https://abc123.ui.nabu.casa/dafc670d_claude-code-ui',
+      'the bare domain lands on the default dashboard, and the raw ingress URL 401s for a session that never went through Home Assistant\'s own app-panel flow');
     assert.equal(link.text, 'abc123.ui.nabu.casa', 'link text stays just the domain — the path is implicit');
     assert.equal(link.target, '_blank', 'a genuinely external destination, unlike the Cloud-settings link above');
     assert.match(await page.$eval('.error-bubble', (el) => el.textContent), /needs HTTPS/);

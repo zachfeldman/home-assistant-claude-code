@@ -38,6 +38,7 @@ import { loadLastUsedSessionId } from './lib/sessions.js';
 import { sanitizeMcpState } from './lib/mcp.js';
 import { ensureUploadDir, cleanupUploads } from './lib/uploads.js';
 import { refreshHaLinks } from './lib/ha-links.js';
+import { refreshSelfSlug } from './lib/self-slug.js';
 import { registerDiagRoutes } from './lib/diag.js';
 import { attach } from './lib/ws-protocol.js';
 import { runQuery } from './lib/run-query.js';
@@ -73,6 +74,7 @@ loadLastUsedSessionId();
 autoContinue.load();
 cleanupUploads();          // drop attachments older than a week
 refreshHaLinks();          // populate entity/automation link targets
+refreshSelfSlug();         // this app's own Supervisor slug, for voice.js's Nabu Casa link
 autoContinue.rearmOnBoot();
 
 server.listen(PORT, '0.0.0.0', () => {

@@ -16,16 +16,22 @@
  *     reached as plain `http://homeassistant.local`. Checked directly via
  *     `isSecureContext` below, so the error names this instead of guessing —
  *     and links either straight back to *this app*, reached through Nabu
- *     Casa's own (already-HTTPS) remote-access URL if already connected (the
- *     bare domain would land on whatever the default dashboard is, not this
- *     chat — see location.pathname below), or to the Home Assistant Cloud
- *     settings page to go connect it if not, rather than just describing what
- *     to go do. The URL comes from the server (HA's own Cloud status is
- *     WebSocket-only, not something this page can ask HA for directly) —
- *     prefetched as soon as the connection opens (maybePrefetchNabuCasaUrl(),
- *     called from connection.js) so it is normally already known by the time
- *     anyone actually holds Space, with a short bounded wait as a fallback
- *     for a first attempt that beats the round trip.
+ *     Casa's own (already-HTTPS) remote-access URL if already connected, or
+ *     to the Home Assistant Cloud settings page to go connect it if not,
+ *     rather than just describing what to go do. "Straight back to this app"
+ *     specifically means `<nabuCasaUrl>/<this app's own Supervisor slug>` —
+ *     not the bare domain (lands on the default dashboard) and not this
+ *     page's own current URL either (the raw ingress proxy path 401s for
+ *     anyone who did not just arrive via Home Assistant's own app-panel,
+ *     which is exactly what a fresh cross-origin tab is) — see
+ *     server/lib/self-slug.js for why. Both the slug and the Nabu Casa URL
+ *     come from the server (Supervisor's own "who am I", and HA's Cloud
+ *     status, which is WebSocket-only — neither is something this page can
+ *     ask for directly); the Nabu Casa one is prefetched as soon as the
+ *     connection opens (maybePrefetchNabuCasaUrl(), called from
+ *     connection.js) so it is normally already known by the time anyone
+ *     actually holds Space, with a short bounded wait as a fallback for a
+ *     first attempt that beats the round trip.
  *   - Denied at the browser/OS level. Ordinary "no mic access" — fixable from
  *     the browser's own site-permission UI, or (on some OSes) system privacy
  *     settings, same as any other site asking for the microphone.
@@ -119,12 +125,17 @@ export async function startVoiceInput() {
     // while this one was awaiting) already found shouldShowVoiceError() closed
     // and returned — this is always the one call that gets to render.
     if (url) {
-      // The bare domain would land on whatever the default dashboard is —
-      // keep the current path (this app's own ingress URL) so the link
-      // reopens this same chat, securely, not somewhere else entirely.
+      // The bare domain lands on the default dashboard; this page's own
+      // location.pathname (the raw ingress proxy URL, /api/hassio_ingress/
+      // <token>/...) 401s instead — that token is minted per-session by Home
+      // Assistant's own app-panel when it loads this app and the backend
+      // proxy rejects a browser that arrived any other way. `/<selfSlug>` is
+      // the app's actual sidebar panel route (Core's addon_panel.py registers
+      // it there), which goes through that flow properly rather than trying
+      // to skip it.
       appendErrorBubbleWithLink(
         `${intro} Your Nabu Casa remote-access URL is already HTTPS — reopen this chat through it:`,
-        url + location.pathname,
+        S.selfSlug ? `${url}/${S.selfSlug}` : url,
         url.replace(/^https:\/\//, ''),
       );
     } else {

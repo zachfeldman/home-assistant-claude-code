@@ -48,4 +48,9 @@ export const S = {
   /** Nabu Casa's remote-access URL, asked for lazily by voice.js (see there).
    *  undefined = not asked yet, null = asked and none is connected, string = the URL. */
   nabuCasaUrl: undefined,
+
+  /** This app's own full Supervisor slug (e.g. "dafc670d_claude-code-ui"),
+   *  sent with every 'config' message — see server/lib/self-slug.js for why
+   *  voice.js needs it. null if the server never resolved one. */
+  selfSlug: null,
 };

@@ -106,6 +106,7 @@ export function handleServerMessage(msg) {
       // is the source of truth — just reflect it.
       if (msg.autoContinue != null) autoContinueToggle.checked = !!msg.autoContinue;
       setAutoContinueSupported(msg.autoContinueSupported !== false);
+      S.selfSlug = msg.selfSlug || null;
       break;
 
     case 'auth_status':

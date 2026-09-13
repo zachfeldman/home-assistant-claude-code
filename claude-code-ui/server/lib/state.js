@@ -28,6 +28,13 @@ export const runtime = {
 
   /** Link targets so replies can turn entity ids into Home Assistant links. */
   haLinks: { entities: [], automations: {} },
+
+  /** This app's own full Supervisor slug (repo-hash prefix included, e.g.
+   *  "dafc670d_claude-code-ui") — Home Assistant registers this app's sidebar
+   *  panel at exactly `/<this slug>`, which is the one stable, session-
+   *  establishing way to link back to it (see self-slug.js). null until
+   *  refreshSelfSlug() resolves, or if it never does (no SUPERVISOR_TOKEN). */
+  selfSlug: null,
 };
 
 /**
