@@ -192,7 +192,8 @@ export function listSessions() {
 // moment it is opened, before anyone pays to find out.
 
 /** Context tokens per the last main-thread assistant usage in `lines` (oldest
- *  first), or null if there is none — or if a compaction came after it, since
+ *  first) that actually reached the model, or null if there is none — or if
+ *  a compaction came after it, since
  *  the size before a compaction says nothing about the size after one. */
 export function contextTokensFromLines(lines) {
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -205,7 +206,10 @@ export function contextTokensFromLines(lines) {
     if (!u) continue;
     const total = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) +
       (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
-    return total || null;
+    // A turn that never reached the model — a usage-limit or API error the
+    // CLI records as a synthetic assistant message — has all-zero usage. It
+    // says nothing about the context, so keep looking for the real last turn.
+    if (total) return total;
   }
   return null;
 }

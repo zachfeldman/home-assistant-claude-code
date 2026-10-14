@@ -179,6 +179,11 @@ describe('contextTokensFromLines', () => {
     assert.equal(contextTokensFromLines([JSON.stringify({ type: 'user', message: { content: 'hi' } }), 'not json']), null);
   });
 
+  test('looks past a turn that never reached the model (a usage-limit error)', () => {
+    const limit = asst(usage(0, 0, 0, 0), { message: { role: 'assistant', model: '<synthetic>', content: [], usage: usage(0, 0, 0, 0) } });
+    assert.equal(contextTokensFromLines([asst(usage(1, 0, 600000, 9)), limit]), 600010);
+  });
+
   test('a compaction followed by a new turn reports the new turn', () => {
     const boundary = JSON.stringify({ type: 'system', subtype: 'compact_boundary' });
     assert.equal(contextTokensFromLines([asst(usage(1, 0, 500000, 0)), boundary, asst(usage(1, 0, 20000, 9))]), 20010);

@@ -1,3 +1,6 @@
+## 1.12.1
+- **Fixed a chat's size showing as nothing when its last turn hit a usage limit.** The CLI records a limit (or API error) as a synthetic assistant message with all-zero usage, and the size reader stopped at it — exactly the chats most worth seeing the size of. It now looks past those to the last turn that actually reached the model
+
 ## 1.12.0
 - **See how big a chat is before you pay for the next message.** Every message re-sends the whole conversation, so a chat that has run for days can cost dollars per reply — and the context meter only ever appeared *after* a reply finished, so opening an old chat gave no warning. The server now reads each chat's size straight off its transcript (the last turn's input + cache + output tokens — free, no run needed) and shows it the moment a chat is opened, and next to every chat in the sessions panel
 - **A "start a new chat" nudge once a chat gets big.** Above ~150k tokens the meter turns amber and a strip above the composer says so, with a **New chat** button; above ~300k it turns red. Dismissable per chat (it returns if the chat crosses the next line). The meter is now coloured by absolute size as well as by % to auto-compact, since in a large window that percentage stays low long after a chat has become expensive
