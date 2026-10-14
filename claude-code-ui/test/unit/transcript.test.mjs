@@ -7,7 +7,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  blockText, isCommandEcho, isQuestionAnswer, lineToItems, truncateOutput,
+  blockText, contextTokensFromLines, isCommandEcho, isQuestionAnswer, lineToItems, truncateOutput,
 } from '../../server/lib/sessions.js';
 
 const at = '2026-07-15T09:30:00.000Z';
@@ -154,5 +154,33 @@ describe('lineToItems', () => {
 
   test('ignores a line type it does not know', () => {
     assert.deepEqual(lineToItems({ type: 'system', message: { content: 'x' } }), []);
+  });
+});
+
+describe('contextTokensFromLines', () => {
+  const asst = (usage, extra = {}) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [], usage }, ...extra });
+  const usage = (input, write, read, output) => ({
+    input_tokens: input, cache_creation_input_tokens: write, cache_read_input_tokens: read, output_tokens: output,
+  });
+
+  test('is everything the last turn was given plus what it wrote', () => {
+    const lines = [asst(usage(5, 10, 100, 1)), asst(usage(2, 344, 729609, 334)), ''];
+    assert.equal(contextTokensFromLines(lines), 2 + 344 + 729609 + 334);
+  });
+
+  test('skips sub-agent turns, which have their own context', () => {
+    const lines = [asst(usage(1, 0, 5000, 0)), asst(usage(1, 0, 90, 0), { isSidechain: true })];
+    assert.equal(contextTokensFromLines(lines), 5001);
+  });
+
+  test('is unknown after a compaction, and unknown with no usage at all', () => {
+    const boundary = JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { preTokens: 500000 } });
+    assert.equal(contextTokensFromLines([asst(usage(1, 0, 500000, 0)), boundary]), null);
+    assert.equal(contextTokensFromLines([JSON.stringify({ type: 'user', message: { content: 'hi' } }), 'not json']), null);
+  });
+
+  test('a compaction followed by a new turn reports the new turn', () => {
+    const boundary = JSON.stringify({ type: 'system', subtype: 'compact_boundary' });
+    assert.equal(contextTokensFromLines([asst(usage(1, 0, 500000, 0)), boundary, asst(usage(1, 0, 20000, 9))]), 20010);
   });
 });

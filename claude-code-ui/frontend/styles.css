@@ -234,6 +234,18 @@ body {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* ── This chat is getting expensive ── */
+.ctx-nudge {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
+  margin: 0 12px 8px; padding: 9px 12px;
+  background: var(--surface-2); border: 1px solid #5a4a24;
+  border-radius: var(--radius-sm); font-size: 13px;
+}
+.ctx-nudge.hidden { display: none; }
+.ctx-nudge-strong { border-color: var(--error-text); }
+.ctx-nudge-text { flex: 1 1 220px; color: #d9a94a; line-height: 1.4; }
+.ctx-nudge-strong .ctx-nudge-text { color: var(--error-text); }
+
 /* ── Sessions panel ── */
 .sessions-panel {
   position: absolute;
@@ -272,6 +284,8 @@ body {
 }
 .session-item.active .session-title { color: #9ec5f0; }
 .session-time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.session-ctx.ctx-warn   { color: #d9a94a; }
+.session-ctx.ctx-danger { color: var(--error-text); font-weight: 600; }
 
 .session-del {
   flex-shrink: 0; background: none; border: none;

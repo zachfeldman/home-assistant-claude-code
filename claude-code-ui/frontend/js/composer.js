@@ -79,6 +79,9 @@ inputForm.onsubmit = async (e) => {
   S.ws.send(JSON.stringify({
     type: 'prompt',
     text,
+    // Which chat this tab believes it is typing into — the server refuses the
+    // prompt if its connection is on a different one (null = a new chat).
+    sessionId: S.activeSessionId || null,
     attachments: payload.length ? payload : undefined,
     permissionMode: permModeSelect.value,
     model: localStorage.getItem('model') || undefined,

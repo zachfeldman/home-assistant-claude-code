@@ -208,6 +208,14 @@
       <button id="question-strip-open" class="ac-banner-action">Answer</button>
     </div>
 
+    <!-- Shown once this chat's context gets large: every message re-sends all
+         of it, so a fresh chat is far cheaper. Dismissable per chat. -->
+    <div id="ctx-nudge" class="ctx-nudge hidden" role="status">
+      <span id="ctx-nudge-text" class="ctx-nudge-text"></span>
+      <button id="ctx-nudge-new" class="ac-banner-action" type="button">New chat</button>
+      <button id="ctx-nudge-dismiss" class="ac-banner-cancel" type="button" title="Hide for this chat">Dismiss</button>
+    </div>
+
     <form id="input-form" class="input-form">
       <div id="cmd-menu" class="cmd-menu hidden"></div>
       <input type="file" id="attach-input" class="hidden-file" multiple

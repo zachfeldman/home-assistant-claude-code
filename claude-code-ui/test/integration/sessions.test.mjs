@@ -189,3 +189,76 @@ describe('persisted MCP servers', () => {
     }
   });
 });
+
+describe('context size, read from the transcript', () => {
+  let h;
+  const big = { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 400000, output_tokens: 300 };
+  before(async () => {
+    h = await startServer({
+      sessions: {
+        'huge': [userLine('Build me a dashboard'),
+          assistantLine([{ type: 'text', text: 'On it.' }], { message: { role: 'assistant', content: [{ type: 'text', text: 'On it.' }], usage: big } })],
+        'tiny': [userLine('Quick question')],
+      },
+      data: { 'active-session.json': { sessionId: 'huge' } },
+    });
+  });
+  after(async () => { await h.stop(); });
+
+  test('the session list carries each chat\'s size', async () => {
+    const c = await h.connect();
+    const s = await c.waitFor('sessions');
+    assert.equal(s.sessions.find((x) => x.id === 'huge').contextTokens, 401302);
+    assert.equal(s.sessions.find((x) => x.id === 'tiny').contextTokens, null);
+  });
+
+  test('opening a chat reports its size before any message is sent', async () => {
+    const c = await h.connect();
+    const u = await c.waitFor('context_usage');
+    assert.equal(u.estimated, true);
+    assert.equal(u.totalTokens, 401302);
+    assert.equal(h.records('query').length, 0, 'no run was needed to find out');
+
+    c.messages.length = 0;
+    c.send({ type: 'session_switch', id: 'tiny' });
+    const u2 = await c.waitFor('context_usage');
+    assert.equal(u2.totalTokens, 0);
+  });
+});
+
+describe('a prompt names the chat it is for', () => {
+  let h;
+  before(async () => {
+    h = await startServer({
+      sessions: {
+        'one': [userLine('First chat')],
+        'two': [userLine('Second chat')],
+      },
+      data: { 'active-session.json': { sessionId: 'one' } },
+    });
+  });
+  after(async () => { await h.stop(); });
+
+  test('a prompt for a different chat than the connection is on is refused, not misdelivered', async () => {
+    const c = await h.connect();
+    await c.waitFor('history');
+    const before = h.records('query').length;
+    c.messages.length = 0;
+    c.send({ type: 'prompt', text: 'meant for two', sessionId: 'two', permissionMode: 'bypass' });
+    const r = await c.waitFor('prompt_rejected');
+    assert.equal(r.text, 'meant for two', 'the text comes back so it is not lost');
+    assert.equal(h.records('query').length, before, 'nothing reached the SDK');
+    // ...and the tab is resynced to the chat the connection is really on.
+    const hist = c.all('history').at(-1);
+    assert.ok(hist.items.some((i) => i.text === 'First chat'));
+  });
+
+  test('a matching sessionId — or none, from an older client — runs normally', async () => {
+    const c = await h.connect();
+    await c.waitFor('history');
+    c.send({ type: 'prompt', text: 'for one', sessionId: 'one', permissionMode: 'bypass' });
+    await c.waitFor('result');
+    assert.equal(h.records('query').at(-1).options.resume, 'one');
+    assert.equal(c.all('prompt_rejected').length, 0);
+  });
+});

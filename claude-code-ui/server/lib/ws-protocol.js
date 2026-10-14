@@ -23,7 +23,7 @@ import {
 } from './auth.js';
 import {
   listSessions, parseSession, deleteSession, sessionFile,
-  getLastUsedSessionId, setLastUsedSessionId,
+  getLastUsedSessionId, setLastUsedSessionId, sessionContextTokens,
 } from './sessions.js';
 import { answerDialog } from './dialogs.js';
 import { getNabuCasaUrl } from './nabu-casa.js';
@@ -58,6 +58,10 @@ function sendSessions(ws, state) {
 function sendSessionView(ws, state) {
   const run = findRunBySessionId(state.sessionId);
   send(ws, { type: 'history', items: parseSession(state.sessionId), running: !!run });
+  // The chat's size as of its last turn, read off the transcript — so it shows
+  // the moment a chat is opened, not only after paying for the next message.
+  // `estimated` tells the client there is no window/compaction data with it.
+  send(ws, { type: 'context_usage', totalTokens: sessionContextTokens(state.sessionId) || 0, estimated: true });
   sendAutoContinueState(ws, state.sessionId);
   if (run) {
     for (const [id, d] of run.pendingDialogs) {
@@ -122,6 +126,17 @@ const handlers = {
       msg.text = describeAttachments(msg.text, saveAttachments(msg.attachments));
     }
     delete msg.attachments;   // do not carry the base64 payload any further
+    // The tab says which chat it believes it is typing into. If that is not
+    // the chat this connection is on, refuse rather than resume the wrong one,
+    // and resync the tab. (A client too old to send it is taken at its word.)
+    if ('sessionId' in msg && (msg.sessionId || null) !== (state.sessionId || null)) {
+      log('WARN', `prompt for session ${msg.sessionId || '(new)'} refused: connection is on ${state.sessionId || '(new)'}`);
+      sendSessions(ws, state);
+      sendSessionView(ws, state);
+      send(ws, { type: 'prompt_rejected', text: msg.text,
+        message: 'This tab was out of step with the server about which chat it was showing, so the message was not sent. The chat has been reloaded — your message is back in the box to send again.' });
+      return;
+    }
     runQuery(ws, state, { ...msg, sessionId: state.sessionId });
   },
 

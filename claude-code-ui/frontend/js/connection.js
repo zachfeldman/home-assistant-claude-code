@@ -5,9 +5,9 @@
 import { S } from './state.js';
 import { appendLimitNotice, hideAcBanner, showAcBanner } from './banners.js';
 import { clearScreen } from './commands.js';
-import { setStatus, updateSendBtn } from './composer.js';
+import { resizeTextarea, setStatus, updateSendBtn } from './composer.js';
 import { closePermission, dropDialog, pendingPerm, showPermissionPrompt, showUserDialog } from './dialogs.js';
-import { autoContinueToggle, loginBtn, loginCodeForm, loginCodeInput, loginDesc, loginScreen, loginTitle, loginUrlEl, loginUrlSect, loginWaiting, modelSelect, permModeSelect, sessionsPanel, wsUrl } from './dom.js';
+import { autoContinueToggle, loginBtn, loginCodeForm, loginCodeInput, loginDesc, loginScreen, loginTitle, loginUrlEl, loginUrlSect, loginWaiting, modelSelect, permModeSelect, promptInput, sessionsPanel, wsUrl } from './dom.js';
 import { relinkRenderedBubbles } from './links.js';
 import { ensureModelOption, updateCtxHint } from './model.js';
 import { renderSessions } from './sessions.js';
@@ -240,8 +240,21 @@ export function handleServerMessage(msg) {
         maxTokens: msg.maxTokens || 0,
         autoCompactThreshold: msg.autoCompactThreshold || 0,
         autoCompactEnabled: !!msg.autoCompactEnabled,
+        estimated: !!msg.estimated,
       };
       updateCtxHint();
+      break;
+
+    case 'prompt_rejected':
+      // The server refused a prompt because this tab and its connection
+      // disagreed about which chat was open (see ws-protocol.js). It has
+      // already re-sent the real view; put the text back so nothing is lost.
+      hideThinking();
+      S.lastAssistantBubble = null;
+      appendErrorBubble(msg.message);
+      if (msg.text && !promptInput.value) { promptInput.value = msg.text; resizeTextarea(); }
+      S.isRunning = false;
+      updateSendBtn();
       break;
 
     case 'compacted':

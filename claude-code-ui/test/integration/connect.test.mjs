@@ -97,8 +97,9 @@ describe('a prompt end to end', () => {
     assert.ok(c.last('session').id, 'the SDK session id is published so the client can track it');
 
     // The context meter is fed *after* the result is broadcast, so a client that
-    // stops listening on `result` would never see it.
-    const usage = await c.waitFor('context_usage');
+    // stops listening on `result` would never see it. (The `estimated` one is
+    // the transcript read sent on connect — not what this is about.)
+    const usage = await c.waitFor((m) => m.type === 'context_usage' && !m.estimated);
     assert.ok(usage.totalTokens > 0);
     assert.ok(usage.maxTokens > 0);
   });

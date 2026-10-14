@@ -15,7 +15,7 @@
  * `?sessionId=`, sessionStorage) is never overridden by another tab changing
  * this.
  */
-import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'fs';
 import path from 'path';
 import { STORE_DIR, ACTIVE_FILE } from './config.js';
 
@@ -142,7 +142,19 @@ export function parseSession(id) {
   return items;
 }
 
+// A title is the conversation's first user message, so once found it never
+// changes — cache it rather than re-reading a (possibly tens-of-MB) transcript
+// on every catalog refresh.
+const titleCache = new Map();
+
 export function sessionTitle(id) {
+  if (titleCache.has(id)) return titleCache.get(id);
+  const t = readSessionTitle(id);
+  if (t) titleCache.set(id, t);
+  return t;
+}
+
+function readSessionTitle(id) {
   try {
     for (const ln of readFileSync(sessionFile(id), 'utf8').split('\n')) {
       if (!ln.trim()) continue;
@@ -163,15 +175,84 @@ export function listSessions() {
   for (const f of readdirSync(STORE_DIR)) {
     if (!f.endsWith('.jsonl')) continue;
     const id = f.slice(0, -6);
-    let mtime = 0; try { mtime = statSync(path.join(STORE_DIR, f)).mtimeMs; } catch {}
+    let mtime = 0, size = 0;
+    try { const st = statSync(path.join(STORE_DIR, f)); mtime = st.mtimeMs; size = st.size; } catch {}
     const title = sessionTitle(id);
     if (!title) continue;   // an empty shell the CLI left behind, not a conversation
-    out.push({ id, title, updatedAt: mtime });
+    out.push({ id, title, updatedAt: mtime, contextTokens: sessionContextTokens(id, mtime, size) });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+// ── Context size, read from the transcript ───────────────────────────────────
+// What the *next* message in a conversation will carry is the context the last
+// assistant turn was given: its usage's input + cache-write + cache-read
+// tokens, plus what it wrote back. Reading that off disk costs nothing — unlike
+// query.getContextUsage(), it needs no run — so a chat's size can be shown the
+// moment it is opened, before anyone pays to find out.
+
+/** Context tokens per the last main-thread assistant usage in `lines` (oldest
+ *  first), or null if there is none — or if a compaction came after it, since
+ *  the size before a compaction says nothing about the size after one. */
+export function contextTokensFromLines(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i];
+    if (!ln.trim()) continue;
+    let obj; try { obj = JSON.parse(ln); } catch { continue; }
+    if (obj.type === 'system' && obj.subtype === 'compact_boundary') return null;
+    if (obj.type !== 'assistant' || obj.isSidechain) continue;
+    const u = obj.message?.usage;
+    if (!u) continue;
+    const total = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) +
+      (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
+    return total || null;
+  }
+  return null;
+}
+
+/** The last `bytes` of a file as whole lines (a partial first line is dropped). */
+function tailLines(file, size, bytes) {
+  const len = Math.min(size, bytes);
+  const buf = Buffer.alloc(len);
+  const fd = openSync(file, 'r');
+  try { readSync(fd, buf, 0, len, size - len); } finally { closeSync(fd); }
+  const lines = buf.toString('utf8').split('\n');
+  if (len < size) lines.shift();
+  return lines;
+}
+
+// Transcripts only grow at the end, and tool results (screenshots especially)
+// make single lines huge, so look at a growing tail rather than the whole file.
+const TAIL_STEPS = [1 << 20, 8 << 20, Infinity];
+const ctxCache = new Map();   // id → { mtime, size, tokens }
+
+/** A session's current context size in tokens, or null if unknown. `mtime` /
+ *  `size` may be passed when the caller has already stat'd the file. */
+export function sessionContextTokens(id, mtime, size) {
+  if (!id) return null;
+  const file = sessionFile(id);
+  if (mtime === undefined || size === undefined) {
+    try { const st = statSync(file); mtime = st.mtimeMs; size = st.size; } catch { return null; }
+  }
+  const hit = ctxCache.get(id);
+  if (hit && hit.mtime === mtime && hit.size === size) return hit.tokens;
+  let tokens = null;
+  try {
+    for (const step of TAIL_STEPS) {
+      const lines = tailLines(file, size, Math.min(step, size));
+      tokens = contextTokensFromLines(lines);
+      if (tokens !== null || step >= size) break;
+      // A compaction in the tail is a definite answer (unknown), not a reason to look further.
+      if (lines.some((l) => l.includes('"compact_boundary"'))) break;
+    }
+  } catch { tokens = null; }
+  ctxCache.set(id, { mtime, size, tokens });
+  return tokens;
+}
+
 export function deleteSession(id) {
+  titleCache.delete(id);
+  ctxCache.delete(id);
   try { unlinkSync(sessionFile(id)); return true; }
   catch (e) { console.warn('Could not delete session:', e.message); return false; }
 }

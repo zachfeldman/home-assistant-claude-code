@@ -2,6 +2,7 @@
  * The sessions panel — past conversations, read from Claude Code's own store.
  */
 import { S } from './state.js';
+import { ctxLevel, fmtTokens } from './model.js';
 import { confirmAction } from './confirm.js';
 import { sessionsBtn, sessionsListEl, sessionsPanel } from './dom.js';
 
@@ -36,6 +37,16 @@ export function renderSessions() {
     const time = document.createElement('div');
     time.className = 'session-time';
     time.textContent = relTime(s.updatedAt);
+    if (s.contextTokens) {
+      // How much the next message in this chat would carry — read off its
+      // transcript by the server, so picking a chat back up isn't a blind spend.
+      const ctx = document.createElement('span');
+      const level = ctxLevel(s.contextTokens);
+      ctx.className = 'session-ctx' + (level === 2 ? ' ctx-danger' : level === 1 ? ' ctx-warn' : '');
+      ctx.textContent = ` · ~${fmtTokens(s.contextTokens)} tokens`;
+      ctx.title = 'Context the next message in this chat would carry';
+      time.appendChild(ctx);
+    }
     main.append(title, time);
 
     const del = document.createElement('button');

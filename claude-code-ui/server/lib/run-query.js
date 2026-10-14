@@ -301,6 +301,9 @@ export async function runQuery(ws, connState, { text, permissionMode, model, eff
           // it is exactly what auto-continue resumes from — but that path never
           // reaches here since `limitHit` is set.)
           connState.sessionId = null;
+          // ...and tell the tab, or it keeps the dead id (and restores it from
+          // sessionStorage on every reconnect).
+          send(ws, { type: 'session', id: null });
         }
         // Sent directly to the requesting tab rather than via emit(): it is the
         // one that needs to know its own request failed, regardless of whether

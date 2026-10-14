@@ -5,7 +5,7 @@
 import { S } from './state.js';
 import { doNewSession, resizeTextarea, runUiCommand, updateSendBtn } from './composer.js';
 import { cmdMenu, messagesEl, newSessionBtn, promptInput, sessionsBtn, sessionsPanel } from './dom.js';
-import { updateCtxHint } from './model.js';
+import { dismissCtxNudge, updateCtxHint } from './model.js';
 
 import { closeSessions, openSessions } from './sessions.js';
 import { appendInfoBubble, toolCallEls } from './transcript.js';
@@ -153,6 +153,8 @@ export function showHelp() {
 // A turn in progress in the abandoned session is not stopped — it keeps running
 // server-side and stays reachable from Sessions, so there is nothing to warn about.
 newSessionBtn.onclick = () => { doNewSession(); };
+document.getElementById('ctx-nudge-new').onclick = () => { doNewSession(); };
+document.getElementById('ctx-nudge-dismiss').onclick = () => { dismissCtxNudge(); };
 
 sessionsBtn.onclick = (e) => {
   e.stopPropagation();
