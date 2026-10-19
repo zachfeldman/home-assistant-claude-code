@@ -87,6 +87,7 @@ describe('the rest of the UI', { skip: executablePath ? false : 'no Chrome found
   test('the settings panel remembers the model and effort you pick', async () => {
     await page.click('#settings-btn');
     await page.waitForSelector('#settings-panel:not(.hidden)', { timeout: 5000 });
+    assert.equal(await page.$eval('#effort-select', (el) => el.value), 'medium', 'effort starts on Medium');
     await page.select('#model-select', 'claude-sonnet-5');
     await page.select('#effort-select', 'low');
     const stored = await page.evaluate(() => [localStorage.getItem('model'), localStorage.getItem('effort')]);

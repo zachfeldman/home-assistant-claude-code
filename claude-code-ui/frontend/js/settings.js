@@ -17,8 +17,11 @@ import { ensureModelOption } from './model.js';
 }
 modelSelect.onchange = () => { localStorage.setItem('model', modelSelect.value); };
 
-// Reasoning effort — empty string means "let the SDK/model decide" (no override).
-effortSelect.value = localStorage.getItem('effort') || '';
+// Reasoning effort. Medium unless the user picked something else; a stored ''
+// (the old "Default" choice, which meant the model's own high) maps to medium
+// too, matching what the server now does when no level is sent.
+const storedEffort = localStorage.getItem('effort');
+effortSelect.value = [...effortSelect.options].some((o) => o.value === storedEffort && storedEffort) ? storedEffort : 'medium';
 effortSelect.onchange = () => { localStorage.setItem('effort', effortSelect.value); };
 
 // Auto-continue on S.usage limit. State is owned by the server (persisted in /data

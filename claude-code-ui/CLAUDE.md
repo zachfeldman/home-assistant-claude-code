@@ -395,7 +395,7 @@ Selectable in the UI per-prompt; the **default for new chats** comes from the `d
 - **Bypass** — all tools auto-approved (auto-allow `canUseTool`, not the SDK `bypassPermissions` mode, which the CLI refuses when running as root — it exits 1)
 - **Auto** — a model classifier approves/denies each tool, no prompts (`permissionMode: 'auto'`, no `canUseTool`)
 
-**Reasoning effort:** the Settings panel has an effort selector (Low→Max) sent as `effort` on the prompt; the server sets `opts.effort` only when a level is chosen (else the SDK model default, high). Higher effort means longer, quieter thinking — a common cause of the "chat looks stuck" perception.
+**Reasoning effort:** the Settings panel has an effort selector (Low→Max) sent as `effort` on the prompt; the server always sets `opts.effort`: the chosen level, else `DEFAULT_EFFORT` (medium, config.js) — not the model's own default (high). Higher effort means longer, quieter thinking — a common cause of the "chat looks stuck" perception.
 
 ## Auto-Continue on Usage Limit
 

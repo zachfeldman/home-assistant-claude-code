@@ -46,6 +46,11 @@ export const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']
 
 /** Valid reasoning-effort levels the UI can request (SDK `effort` option). */
 export const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+/** Effort used when a prompt names none (or an invalid one) — including
+ *  auto-continue resumes and older cached tabs. Medium rather than the model's
+ *  own default (high): every turn's hidden reasoning counts against usage, and
+ *  most Home Assistant tasks don't need it. Pick High in Settings when they do. */
+export const DEFAULT_EFFORT = 'medium';
 
 /** Files the app owns on its persistent volume. */
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');

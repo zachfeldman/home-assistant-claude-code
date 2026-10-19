@@ -152,3 +152,29 @@ describe('a long tool result', () => {
     assert.ok(res.output.endsWith('…[truncated]'));
   });
 });
+
+describe('reasoning effort', () => {
+  let h;
+  before(async () => { h = await startServer({}); });
+  after(async () => { await h.stop(); });
+
+  test('defaults to medium when the prompt names none', async () => {
+    const c = await h.connect();
+    await c.waitFor('history');
+    c.send({ type: 'prompt', text: 'hi', permissionMode: 'bypass' });
+    await c.waitFor('result');
+    assert.equal(h.records('query').at(-1).options.effort, 'medium');
+  });
+
+  test('uses the level the prompt names, and ignores an invalid one', async () => {
+    const c = await h.connect();
+    await c.waitFor('history');
+    c.send({ type: 'prompt', text: 'think hard', permissionMode: 'bypass', effort: 'high' });
+    await c.waitFor('result');
+    assert.equal(h.records('query').at(-1).options.effort, 'high');
+    c.messages.length = 0;
+    c.send({ type: 'prompt', text: 'again', permissionMode: 'bypass', effort: 'bogus' });
+    await c.waitFor('result');
+    assert.equal(h.records('query').at(-1).options.effort, 'medium');
+  });
+});

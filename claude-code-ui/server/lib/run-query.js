@@ -11,7 +11,7 @@
  */
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import {
-  WORK_DIR, PLUGINS, EFFORT_LEVELS, DEFAULT_PERMISSION_MODE,
+  WORK_DIR, PLUGINS, EFFORT_LEVELS, DEFAULT_EFFORT, DEFAULT_PERMISSION_MODE,
 } from './config.js';
 import { log, vlog } from './log.js';
 import { runtime, createRun, removeRun, findRunBySessionId } from './state.js';
@@ -96,9 +96,9 @@ export async function runQuery(ws, connState, { text, permissionMode, model, eff
 
   const opts = { cwd: WORK_DIR, abortController, plugins: PLUGINS };
   if (model) opts.model = model;
-  // Only override effort when the UI asked for a level; otherwise the SDK's own
-  // model default applies.
-  if (effort && EFFORT_LEVELS.has(effort)) opts.effort = effort;
+  // Always set: the UI's level if it sent a valid one, otherwise DEFAULT_EFFORT
+  // (medium) rather than the model's own, higher default.
+  opts.effort = effort && EFFORT_LEVELS.has(effort) ? effort : DEFAULT_EFFORT;
 
   run.permMode = permissionMode || DEFAULT_PERMISSION_MODE;
 
