@@ -151,7 +151,7 @@ export async function runQuery(ws, connState, { text, permissionMode, model, eff
         ` maxTokens=${u.maxTokens} autoCompact=${u.isAutoCompactEnabled ? 'on' : 'off'}` +
         ` threshold=${u.autoCompactThreshold || 'n/a'}`;
       if (pct >= 90) log('WARN', `${detail} — near auto-compact; a turn may pause while it compacts`);
-      else vlog(detail);
+      else log('INFO', detail);
     } catch (e) { vlog(`getContextUsage failed: ${e?.message || e}`); }
   };
 
@@ -180,13 +180,19 @@ export async function runQuery(ws, connState, { text, permissionMode, model, eff
 
       if (event.type === 'system' && event.subtype === 'init') {
         run.sessionId = event.session_id;
-        if (!resuming) { connState.sessionId = event.session_id; connState.pendingRunId = null; }
+        // Only a brand-new chat the tab is *still waiting on* adopts the id. A
+        // resumed run already has it, and a tab that has since started another
+        // new chat or switched away (which clears pendingRunId) must not be
+        // dragged back — a late 'session' used to silently re-point the tab at
+        // the old conversation while the screen showed a new one.
+        const adopt = !resuming && connState.pendingRunId === run.runId;
+        if (adopt) { connState.sessionId = event.session_id; connState.pendingRunId = null; }
         // Whichever session anyone just resumed or created becomes the default
         // a fresh, unqualified connection lands on next (see sessions.js).
         setLastUsedSessionId(event.session_id);
         // Only the tab that started a brand-new chat needs to learn its id (to
         // persist it client-side) — nobody else could be viewing it yet.
-        send(ws, { type: 'session', id: event.session_id });
+        if (adopt) send(ws, { type: 'session', id: event.session_id });
         if (event.model) emit({ type: 'model', model: event.model });
         // Terminal-only commands (/exit, /statusline …) are dropped here rather
         // than in the browser, so there is one place that knows this is a
@@ -261,8 +267,11 @@ export async function runQuery(ws, connState, { text, permissionMode, model, eff
           broadcast({ type: 'auth_status', authenticated: true });
         }
         const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const u = event.usage || {};
+        const k = (n) => `${Math.round((n || 0) / 1000)}k`;
         log('INFO', `result: ${event.subtype} in ${secs}s, ${event.num_turns} turns, ` +
-          `$${(event.total_cost_usd || 0).toFixed(4)}`);
+          `$${(event.total_cost_usd || 0).toFixed(4)} — tokens: cache read ${k(u.cache_read_input_tokens)}, ` +
+          `cache write ${k(u.cache_creation_input_tokens)}, input ${k(u.input_tokens)}, output ${k(u.output_tokens)}`);
         emit({
           type: 'result',
           success: event.subtype === 'success',
@@ -314,7 +323,7 @@ export async function runQuery(ws, connState, { text, permissionMode, model, eff
   } finally {
     clearInterval(watchdog);
     removeRun(run);
-    if (!resuming) connState.pendingRunId = null;
+    if (connState.pendingRunId === run.runId) connState.pendingRunId = null;
     if (abortController.signal.aborted) {
       log('INFO', `query aborted by user after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
       emit({ type: 'aborted' });

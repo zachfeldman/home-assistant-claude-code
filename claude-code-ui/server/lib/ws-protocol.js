@@ -147,6 +147,9 @@ const handlers = {
 
   new_session(ws, _msg, state) {
     state.sessionId = null;
+    // A new chat this tab started earlier and has not yet got its id keeps
+    // running, but this tab has moved on and must not adopt it (run-query.js).
+    state.pendingRunId = null;
     // Also updates the shared default, matching the original behavior: a
     // fresh tab that has never expressed a preference lands on "new chat"
     // right after someone starts one, rather than an old conversation.
@@ -166,6 +169,7 @@ const handlers = {
     // or was deleted mid-flight — no error needed either way.
     const id = msg.id || null;
     state.sessionId = id;
+    state.pendingRunId = null;   // see new_session
     // This tab explicitly chose a conversation — that becomes the new default
     // for the *next* fresh, unqualified connection too (persisted on disk),
     // but it does not move any other already-open tab, which is the whole

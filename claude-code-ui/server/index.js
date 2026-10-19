@@ -86,4 +86,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Auto-continue on limit: ${autoContinue.autoContinue.enabled ? 'on' : 'off'} ` +
     `(${isSubscriptionAuth() ? 'subscription' : 'api-key'} auth)`);
   console.log(`  Verbose logging: ${VERBOSE_LOGGING ? 'on' : 'off'}`);
+  console.log(`  Auto-compact window: ${process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || 'model default'}`);
 });

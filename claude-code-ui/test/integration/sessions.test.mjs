@@ -262,3 +262,35 @@ describe('a prompt names the chat it is for', () => {
     assert.equal(c.all('prompt_rejected').length, 0);
   });
 });
+
+describe('only a brand-new chat hands its id back to the tab', () => {
+  let h;
+  before(async () => {
+    h = await startServer({
+      sessions: { 'one': [userLine('First chat')] },
+      data: { 'active-session.json': { sessionId: 'one' } },
+    });
+  });
+  after(async () => { await h.stop(); });
+
+  // A resumed run's id is the one the tab is already on. Sending it anyway
+  // meant that a tab which had moved to a new chat while the reply was still
+  // running got silently re-pointed at the old conversation.
+  test('a resumed run sends no session message', async () => {
+    const c = await h.connect();
+    await c.waitFor('history');
+    c.send({ type: 'prompt', text: 'carry on', sessionId: 'one', permissionMode: 'bypass' });
+    await c.waitFor('result');
+    assert.equal(c.all('session').length, 0);
+  });
+
+  test('a new chat does', async () => {
+    const c = await h.connect();
+    await c.waitFor('history');
+    c.send({ type: 'new_session' });
+    await c.waitFor('cleared');
+    c.send({ type: 'prompt', text: 'fresh start', sessionId: null, permissionMode: 'bypass' });
+    const s = await c.waitFor('session');
+    assert.ok(s.id);
+  });
+});

@@ -30,6 +30,14 @@ configuration:
     description: >-
       Write detailed per-event logs to the app log for diagnosing a chat that
       seems to hang. Milestone logs are always recorded.
+  auto_compact_window:
+    name: Auto-compact window (tokens)
+    description: >-
+      Treat the context window as this many tokens when deciding to
+      auto-compact, so long chats are summarised at about this size minus a
+      small buffer instead of growing toward the model's full (up to 1M token)
+      window. Every message re-sends the whole conversation, so this caps what
+      each reply in a long chat costs. 0 uses the model's full window.
   debug:
     name: Debug mode (dangerous)
     description: >-

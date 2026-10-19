@@ -1,3 +1,8 @@
+## 1.13.0
+- **Long chats now compact at ~167k tokens instead of ~967k.** The model's 1M-token window meant auto-compaction only kicked in once a chat was nearly a million tokens — and since every message re-sends the whole conversation, chats sat at 400–900k tokens costing dollars per reply long before that. A new **Auto-compact window** app option (default `200000`) is passed to Claude Code as `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, so a chat is summarised at about that size minus a ~33k buffer (verified with `/context`: `13.3k / 200k`). Set it to `0` to go back to the model's full window. An existing chat already past the new limit compacts on its next message — one heavier turn, then much cheaper ones
+- **Fixed a tab being silently pointed back at an old chat.** Every run — not only a brand-new chat — sent its session id back to the tab that started it, so starting a new chat (or switching) while a reply was still finishing could re-point the tab at the old conversation while the screen showed the new one. 1.12's session check caught this live and refused the message rather than misdeliver it; the id is now only handed back to a tab still waiting on that brand-new chat
+- The app log's per-run `result:` line now includes the token breakdown (cache read / cache write / input / output), and the context size is logged after every run, so where usage goes is visible without verbose logging
+
 ## 1.12.1
 - **Fixed a chat's size showing as nothing when its last turn hit a usage limit.** The CLI records a limit (or API error) as a synthetic assistant message with all-zero usage, and the size reader stopped at it — exactly the chats most worth seeing the size of. It now looks past those to the last turn that actually reached the model
 
