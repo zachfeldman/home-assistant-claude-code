@@ -19,7 +19,7 @@
  * so this subsystem works correctly in a world where other, unrelated
  * conversations may be running at the same time.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import {
   AUTO_CONTINUE_FILE, AUTO_CONTINUE_BUFFER_MS, AUTO_CONTINUE_MAX_ATTEMPTS,
   AUTO_CONTINUE_PROMPT, LIMIT_OFFER_GRACE_MS,
@@ -58,7 +58,14 @@ export function load() {
 }
 
 export function save() {
-  try { writeFileSync(AUTO_CONTINUE_FILE, JSON.stringify(autoContinue)); }
+  // Write-then-rename so a reader (or a restart) never sees a half-written
+  // file: writeFileSync truncates first, and a read landing in that window got
+  // empty JSON — seen as a flaky CI failure.
+  try {
+    const tmp = `${AUTO_CONTINUE_FILE}.tmp`;
+    writeFileSync(tmp, JSON.stringify(autoContinue));
+    renameSync(tmp, AUTO_CONTINUE_FILE);
+  }
   catch (e) { console.warn('Could not save auto-continue state:', e.message); }
 }
 

@@ -1,5 +1,6 @@
 ## 1.13.2
 - **Reasoning effort now defaults to Medium** instead of the model's own default (high). Every turn's hidden reasoning counts against usage, and most Home Assistant tasks don't need high. The Settings dropdown shows **Medium (default)**; pick **High** (or above) for the hard ones. The server applies medium whenever no level is sent — older cached tabs and auto-continue resumes included — and a previously stored "Default" choice now means medium
+- Auto-continue state is now saved atomically (write, then rename), so a restart or read mid-save can't see a half-written file
 
 ## 1.13.1
 - **Removed the Auto-compact window option added in 1.13.0.** Auto-compaction is back to Claude Code's own default (near the model's full window) — the app no longer sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. The 1.13.0 session fix and token logging stay
