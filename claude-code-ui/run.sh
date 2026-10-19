@@ -180,20 +180,6 @@ start_server() {
     export DEBUG_MODE=$(bashio::config 'debug' 'false')
     export VERBOSE_LOGGING=$(bashio::config 'verbose_logging' 'false')
 
-    # Compact long chats well before the model's full window: every message
-    # re-sends the whole conversation, so a chat left to grow to ~1M tokens
-    # costs dollars per reply. The Claude Code CLI reads this from the env
-    # every SDK run inherits. 0 = leave the model's own window in charge.
-    local compact_window
-    compact_window=$(bashio::config 'auto_compact_window' '200000')
-    if [ -n "$compact_window" ] && [ "$compact_window" != "0" ]; then
-        export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$compact_window"
-        bashio::log.info "Auto-compact window: ${compact_window} tokens"
-    else
-        unset CLAUDE_CODE_AUTO_COMPACT_WINDOW
-        bashio::log.info "Auto-compact window: model default"
-    fi
-
     if [ "$DEBUG_MODE" = "true" ]; then
         bashio::log.info "Debug mode enabled — /diag endpoint active"
     fi
